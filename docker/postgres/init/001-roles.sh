@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# PostgreSQL runtime roles for local development and integration tests.
 set -euo pipefail
 
 psql \
