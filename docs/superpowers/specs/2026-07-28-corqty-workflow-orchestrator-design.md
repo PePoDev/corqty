@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Approved design, pending written-spec review
+**Status:** Approved; implementation planned by milestone
 
 ## 1. Product summary
 
@@ -98,9 +98,10 @@ Each executable depends on shared crates; API handlers do not contain scheduling
 
 - A new user registers with email/password and creates an organization; that user becomes an `admin`.
 - An admin generates a time-limited invitation link for an email and role. SMTP delivery is outside the first release; the UI makes the link copyable.
+- Invitation plaintext appears only in the SPA URL fragment and is submitted in an authenticated `POST` body; it is never placed in an HTTP path or query string.
 - Users may belong to multiple organizations and select the active organization in the application shell.
 - There is no `owner` role.
-- An organization must always retain at least one active admin. Removing, suspending, or demoting the final admin is rejected transactionally.
+- An organization must always retain at least one admin. Removing or demoting the final admin is rejected transactionally.
 
 ### 6.2 Fixed permission matrix
 
