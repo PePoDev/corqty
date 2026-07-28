@@ -1,0 +1,97 @@
+import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom"
+
+import { api } from "@/api/client"
+import { useAuth } from "@/auth/auth-context"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+
+const links = [{ label: "Overview", suffix: "" }]
+
+export function AppShell() {
+  const { organizationId } = useParams()
+  const { me, refresh } = useAuth()
+  const navigate = useNavigate()
+  const membership = me?.organizations.find(
+    (organization) => organization.organizationId === organizationId,
+  )
+  if (!me || !membership) {
+    return <p className="p-6">Organization not found.</p>
+  }
+
+  async function logout() {
+    await api("/auth/logout", { method: "POST" })
+    await refresh()
+    navigate("/login")
+  }
+
+  return (
+    <div className="min-h-screen bg-background md:grid md:grid-cols-[220px_1fr]">
+      <a
+        href="#main-content"
+        className="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm shadow focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+      >
+        Skip to content
+      </a>
+      <aside className="flex flex-wrap items-center border-b bg-sidebar p-3 text-sidebar-foreground md:min-h-screen md:flex-nowrap md:flex-col md:items-stretch md:border-r md:border-b-0">
+        <div className="flex items-center gap-2 px-2 py-3">
+          <span className="grid size-7 place-items-center rounded-md bg-foreground text-xs font-bold text-background">
+            C
+          </span>
+          <span className="font-semibold tracking-tight">Corqty</span>
+        </div>
+        <select
+          aria-label="Organization"
+          className="ml-auto h-9 max-w-48 rounded-md border bg-background px-2 text-sm md:ml-0 md:max-w-none"
+          value={membership.organizationId}
+          onChange={(event) => navigate(`/orgs/${event.target.value}`)}
+        >
+          {me.organizations.map((organization) => (
+            <option
+              key={organization.organizationId}
+              value={organization.organizationId}
+            >
+              {organization.name}
+            </option>
+          ))}
+        </select>
+        <Separator className="mx-3 hidden md:my-3 md:block" />
+        <nav
+          aria-label="Organization"
+          className="order-3 mt-3 flex basis-full gap-1 overflow-x-auto md:order-none md:mt-0 md:flex-col"
+        >
+          {links.map((link) => (
+            <NavLink
+              key={link.label}
+              end={link.suffix === ""}
+              to={`/orgs/${membership.organizationId}${link.suffix}`}
+              className={({ isActive }) =>
+                `rounded-md px-3 py-2 text-sm ${
+                  isActive
+                    ? "bg-sidebar-accent font-medium"
+                    : "text-muted-foreground"
+                }`
+              }
+            >
+              {link.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="ml-2 flex items-center gap-2 md:mt-auto md:ml-0 md:flex-col md:items-stretch md:gap-2 md:border-t md:pt-3">
+          <span className="hidden truncate px-2 text-xs text-muted-foreground md:block">
+            {me.user.email}
+          </span>
+          <div className="flex items-center justify-between gap-2 px-2">
+            <Badge variant="secondary">{membership.role}</Badge>
+            <Button variant="ghost" size="sm" onClick={() => void logout()}>
+              Log out
+            </Button>
+          </div>
+        </div>
+      </aside>
+      <main id="main-content" className="min-w-0">
+        <Outlet />
+      </main>
+    </div>
+  )
+}
