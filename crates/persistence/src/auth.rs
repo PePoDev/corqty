@@ -3,9 +3,9 @@ use sqlx::Error;
 use uuid::Uuid;
 
 use crate::{
-    models::{RegistrationRecord, SessionRecord},
+    models::{OrganizationMembershipRecord, RegistrationRecord, SessionRecord},
     store::PgStore,
-    tenant::begin_tenant,
+    tenant::{begin_tenant, begin_user},
 };
 
 pub struct NewRegistration {
@@ -95,6 +95,22 @@ impl PgStore {
         .bind(email)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    pub async fn organizations_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<OrganizationMembershipRecord>, Error> {
+        let mut tx = begin_user(&self.pool, user_id).await?;
+        let records = sqlx::query_as(
+            "SELECT organization_id, name, slug, role
+             FROM corqty.organizations_for_current_user()
+             ORDER BY name, organization_id",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.rollback().await?;
+        Ok(records)
     }
 
     pub async fn create_session(&self, user_id: Uuid, session: NewSession) -> Result<(), Error> {
