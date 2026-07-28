@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: corqty_test
+          POSTGRES_USER: corqty_owner
+          POSTGRES_PASSWORD: corqty_owner_dev
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U corqty_owner -d corqty_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy,rustfmt
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Create database roles
+        env:
+          PGPASSWORD: corqty_owner_dev
+        run: |
+          psql -h localhost -p 55432 -U corqty_owner -d corqty_test \
+            -c "CREATE ROLE corqty_api LOGIN PASSWORD 'corqty_api_dev' NOBYPASSRLS"
+          psql -h localhost -p 55432 -U corqty_owner -d corqty_test \
+            -c "CREATE ROLE corqty_worker LOGIN PASSWORD 'corqty_worker_dev' NOBYPASSRLS"
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm web:lint
+      - run: pnpm web:test
+      - run: pnpm web:build
+      - name: Start fresh Compose stack
+        run: docker compose --project-name corqty-ci up --build --wait
+      - name: Run Compose smoke test
+        shell: pwsh
+        run: ./scripts/smoke-foundation.ps1 -ProjectName corqty-ci
+      - name: Remove Compose stack
+        if: always()
+        run: docker compose --project-name corqty-ci down --volumes

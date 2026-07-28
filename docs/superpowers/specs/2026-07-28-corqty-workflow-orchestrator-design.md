@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Approved; implementation planned by milestone
+**Status:** Approved; Milestone 1 foundation implemented
 
 ## 1. Product summary
 
