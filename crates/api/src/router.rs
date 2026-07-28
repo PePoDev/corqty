@@ -8,6 +8,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::{
     auth::{handlers, middleware as auth_middleware},
+    organizations,
     state::AppState,
 };
 
@@ -15,6 +16,7 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/auth/me", get(handlers::me))
         .route("/auth/logout", post(handlers::logout))
+        .route("/organizations", post(organizations::handlers::create))
         .route(
             "/auth/password",
             axum::routing::patch(handlers::change_password),

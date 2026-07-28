@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use axum::{
     Router,
     body::{Body, to_bytes},
