@@ -1,0 +1,14 @@
+[package]
+name = "corqty-migrator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+corqty-persistence = { path = "../persistence" }
+sqlx.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

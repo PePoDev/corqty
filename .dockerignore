@@ -1,0 +1,7 @@
+.git
+.superpowers
+**/node_modules
+**/dist
+target
+.env
+coverage

@@ -1,0 +1,10 @@
+{
+  "name": "corqty",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "web:build": "pnpm --filter @corqty/web build",
+    "web:lint": "pnpm --filter @corqty/web lint",
+    "web:test": "pnpm --filter @corqty/web test"
+  }
+}
