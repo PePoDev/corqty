@@ -36,5 +36,5 @@ uuid = { version = "1", features = ["serde", "v4"] }
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
-all = "warn"
+all = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"

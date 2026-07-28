@@ -9,7 +9,7 @@ use corqty_domain::{
     rbac::{Capability, Role},
 };
 use corqty_persistence::{
-    members::{MemberMutationError, MemberRecord},
+    members::{MemberMutationError, MemberRecord, NewInvitation},
     models::SessionRecord,
 };
 use serde::{Deserialize, Serialize};
@@ -65,15 +65,15 @@ pub async fn create_invitation(
     let expires_at = Utc::now() + Duration::days(7);
     state
         .store
-        .create_invitation(
-            session.user_id,
+        .create_invitation(NewInvitation {
+            actor_user_id: session.user_id,
             organization_id,
-            Uuid::new_v4(),
-            email.as_str(),
-            role.as_str(),
-            &token.hash,
+            invitation_id: Uuid::new_v4(),
+            email: email.as_str(),
+            role: role.as_str(),
+            token_hash: &token.hash,
             expires_at,
-        )
+        })
         .await
         .map_err(|_| ApiError::Internal)?;
     let base = state.config.public_web_url.trim_end_matches('/');

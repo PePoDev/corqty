@@ -38,41 +38,53 @@ pub struct MemberRecord {
     pub role: String,
 }
 
+pub struct NewInvitation<'a> {
+    pub actor_user_id: Uuid,
+    pub organization_id: Uuid,
+    pub invitation_id: Uuid,
+    pub email: &'a str,
+    pub role: &'a str,
+    pub token_hash: &'a [u8],
+    pub expires_at: DateTime<Utc>,
+}
+
 impl PgStore {
     pub async fn create_invitation(
         &self,
-        actor_user_id: Uuid,
-        organization_id: Uuid,
-        invitation_id: Uuid,
-        email: &str,
-        role: &str,
-        token_hash: &[u8],
-        expires_at: DateTime<Utc>,
+        invitation: NewInvitation<'_>,
     ) -> Result<(), sqlx::Error> {
-        let mut tx = begin_tenant(&self.pool, actor_user_id, organization_id).await?;
+        let mut tx = begin_tenant(
+            &self.pool,
+            invitation.actor_user_id,
+            invitation.organization_id,
+        )
+        .await?;
         sqlx::query(
             "INSERT INTO invitations(
                 id, organization_id, email, role,
                 token_hash, invited_by, expires_at
              ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
-        .bind(invitation_id)
-        .bind(organization_id)
-        .bind(email)
-        .bind(role)
-        .bind(token_hash)
-        .bind(actor_user_id)
-        .bind(expires_at)
+        .bind(invitation.invitation_id)
+        .bind(invitation.organization_id)
+        .bind(invitation.email)
+        .bind(invitation.role)
+        .bind(invitation.token_hash)
+        .bind(invitation.actor_user_id)
+        .bind(invitation.expires_at)
         .execute(&mut *tx)
         .await?;
         crate::audit::insert_in_transaction(
             &mut tx,
-            organization_id,
-            actor_user_id,
+            invitation.organization_id,
+            invitation.actor_user_id,
             "invitation.created",
             "invitation",
-            &invitation_id.to_string(),
-            serde_json::json!({ "email": email, "role": role }),
+            &invitation.invitation_id.to_string(),
+            serde_json::json!({
+                "email": invitation.email,
+                "role": invitation.role,
+            }),
         )
         .await?;
         tx.commit().await
