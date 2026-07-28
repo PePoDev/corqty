@@ -30,6 +30,16 @@ impl PgStore {
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
+        crate::audit::insert_in_transaction(
+            &mut tx,
+            organization_id,
+            user_id,
+            "organization.created",
+            "organization",
+            &organization_id.to_string(),
+            serde_json::json!({ "name": name }),
+        )
+        .await?;
         tx.commit().await?;
         Ok(OrganizationMembershipRecord {
             organization_id,

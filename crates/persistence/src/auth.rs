@@ -75,6 +75,24 @@ impl PgStore {
         .bind(registration.user_id)
         .execute(&mut *tx)
         .await?;
+        crate::audit::insert_in_transaction(
+            &mut tx,
+            registration.organization_id,
+            registration.user_id,
+            "organization.created",
+            "organization",
+            &registration.organization_id.to_string(),
+            serde_json::json!({ "name": registration.organization_name }),
+        )
+        .await?;
+        crate::audit::insert_user_event_in_transaction(
+            &mut tx,
+            "account.registered",
+            "user",
+            &registration.user_id.to_string(),
+            serde_json::json!({}),
+        )
+        .await?;
         insert_session(&mut tx, registration.user_id, session).await?;
         tx.commit().await?;
 
@@ -114,8 +132,17 @@ impl PgStore {
     }
 
     pub async fn create_session(&self, user_id: Uuid, session: NewSession) -> Result<(), Error> {
-        let mut tx = self.pool.begin().await?;
+        let session_id = session.session_id;
+        let mut tx = begin_user(&self.pool, user_id).await?;
         insert_session(&mut tx, user_id, session).await?;
+        crate::audit::insert_user_event_in_transaction(
+            &mut tx,
+            "auth.login",
+            "session",
+            &session_id.to_string(),
+            serde_json::json!({}),
+        )
+        .await?;
         tx.commit().await
     }
 
@@ -136,12 +163,22 @@ impl PgStore {
         .await
     }
 
-    pub async fn delete_session(&self, session_id: Uuid) -> Result<(), Error> {
-        sqlx::query("DELETE FROM sessions WHERE id = $1")
+    pub async fn delete_session(&self, user_id: Uuid, session_id: Uuid) -> Result<(), Error> {
+        let mut tx = begin_user(&self.pool, user_id).await?;
+        sqlx::query("DELETE FROM sessions WHERE id = $1 AND user_id = $2")
             .bind(session_id)
-            .execute(&self.pool)
+            .bind(user_id)
+            .execute(&mut *tx)
             .await?;
-        Ok(())
+        crate::audit::insert_user_event_in_transaction(
+            &mut tx,
+            "auth.logout",
+            "session",
+            &session_id.to_string(),
+            serde_json::json!({}),
+        )
+        .await?;
+        tx.commit().await
     }
 
     pub async fn list_sessions(
@@ -165,7 +202,7 @@ impl PgStore {
         current_session_id: Uuid,
         password_hash: &str,
     ) -> Result<(), Error> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = begin_user(&self.pool, user_id).await?;
         sqlx::query(
             "UPDATE password_credentials
              SET password_hash = $2, updated_at = now()
@@ -183,6 +220,14 @@ impl PgStore {
         .bind(current_session_id)
         .execute(&mut *tx)
         .await?;
+        crate::audit::insert_user_event_in_transaction(
+            &mut tx,
+            "account.password_changed",
+            "user",
+            &user_id.to_string(),
+            serde_json::json!({}),
+        )
+        .await?;
         tx.commit().await
     }
 
@@ -191,12 +236,24 @@ impl PgStore {
         user_id: Uuid,
         session_id: Uuid,
     ) -> Result<bool, Error> {
+        let mut tx = begin_user(&self.pool, user_id).await?;
         let affected = sqlx::query("DELETE FROM sessions WHERE id = $1 AND user_id = $2")
             .bind(session_id)
             .bind(user_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?
             .rows_affected();
+        if affected == 1 {
+            crate::audit::insert_user_event_in_transaction(
+                &mut tx,
+                "session.revoked",
+                "session",
+                &session_id.to_string(),
+                serde_json::json!({}),
+            )
+            .await?;
+        }
+        tx.commit().await?;
         Ok(affected == 1)
     }
 }

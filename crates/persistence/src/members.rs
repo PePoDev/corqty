@@ -65,6 +65,16 @@ impl PgStore {
         .bind(expires_at)
         .execute(&mut *tx)
         .await?;
+        crate::audit::insert_in_transaction(
+            &mut tx,
+            organization_id,
+            actor_user_id,
+            "invitation.created",
+            "invitation",
+            &invitation_id.to_string(),
+            serde_json::json!({ "email": email, "role": role }),
+        )
+        .await?;
         tx.commit().await
     }
 
@@ -139,6 +149,16 @@ impl PgStore {
         .bind(new_role)
         .execute(&mut *tx)
         .await?;
+        crate::audit::insert_in_transaction(
+            &mut tx,
+            organization_id,
+            actor_user_id,
+            "membership.role_changed",
+            "membership",
+            &target_user_id.to_string(),
+            serde_json::json!({ "role": new_role }),
+        )
+        .await?;
         tx.commit().await.map_err(MemberMutationError::from)
     }
 
@@ -163,6 +183,16 @@ impl PgStore {
         if current_role == "admin" && admin_count(&mut tx, organization_id).await? == 1 {
             return Err(MemberMutationError::FinalAdmin);
         }
+        crate::audit::insert_in_transaction(
+            &mut tx,
+            organization_id,
+            actor_user_id,
+            "membership.removed",
+            "membership",
+            &target_user_id.to_string(),
+            serde_json::json!({}),
+        )
+        .await?;
         sqlx::query(
             "DELETE FROM memberships
              WHERE organization_id = $1 AND user_id = $2",

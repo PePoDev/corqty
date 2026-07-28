@@ -7,6 +7,7 @@ use axum::{
 use tower_http::trace::TraceLayer;
 
 use crate::{
+    audit,
     auth::{handlers, middleware as auth_middleware},
     organizations,
     state::AppState,
@@ -29,6 +30,7 @@ pub fn build_router(state: AppState) -> Router {
             "/orgs/{organization_id}/members",
             get(organizations::members::list_members),
         )
+        .route("/orgs/{organization_id}/audit-events", get(audit::list))
         .route(
             "/orgs/{organization_id}/members/{target_user_id}",
             axum::routing::patch(organizations::members::change_role)

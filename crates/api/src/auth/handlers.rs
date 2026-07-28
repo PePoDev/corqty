@@ -90,7 +90,7 @@ pub async fn logout(
 ) -> Result<impl IntoResponse, ApiError> {
     state
         .store
-        .delete_session(session.session_id)
+        .delete_session(session.user_id, session.session_id)
         .await
         .map_err(|_| ApiError::Internal)?;
     let mut headers = HeaderMap::new();
