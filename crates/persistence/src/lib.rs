@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod auth;
+pub mod members;
 pub mod migrate;
 pub mod models;
 pub mod organizations;

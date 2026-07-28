@@ -18,6 +18,23 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/logout", post(handlers::logout))
         .route("/organizations", post(organizations::handlers::create))
         .route(
+            "/orgs/{organization_id}/invitations",
+            post(organizations::members::create_invitation),
+        )
+        .route(
+            "/invitations/accept",
+            post(organizations::members::accept_invitation),
+        )
+        .route(
+            "/orgs/{organization_id}/members",
+            get(organizations::members::list_members),
+        )
+        .route(
+            "/orgs/{organization_id}/members/{target_user_id}",
+            axum::routing::patch(organizations::members::change_role)
+                .delete(organizations::members::remove_member),
+        )
+        .route(
             "/auth/password",
             axum::routing::patch(handlers::change_password),
         )
