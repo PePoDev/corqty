@@ -6,7 +6,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 
-const links = [{ label: "Overview", suffix: "" }]
+const links = [
+  { label: "Overview", suffix: "" },
+  { label: "Members", suffix: "/members" },
+  { label: "Audit log", suffix: "/audit" },
+]
 
 export function AppShell() {
   const { organizationId } = useParams()
