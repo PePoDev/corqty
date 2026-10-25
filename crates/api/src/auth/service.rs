@@ -53,7 +53,7 @@ pub async fn register(
     let password_owned = password.to_owned();
     let password_hash = tokio::task::spawn_blocking(move || PasswordEngine::hash(&password_owned))
         .await
-        .map_err(|_| ApiError::Internal)??;
+        .map_err(ApiError::internal)??;
     let session_token = SecretToken::generate()?;
     let csrf_token = SecretToken::generate()?;
     let user_id = Uuid::new_v4();
@@ -117,11 +117,7 @@ pub async fn login(
     password: &str,
 ) -> Result<IssuedSession, ApiError> {
     let record = match NormalizedEmail::parse(email) {
-        Ok(email) => state
-            .store
-            .login_record(email.as_str())
-            .await
-            .map_err(|_| ApiError::Internal)?,
+        Ok(email) => state.store.login_record(email.as_str()).await?,
         Err(_) => None,
     };
     let password_owned = password.to_owned();
@@ -133,7 +129,7 @@ pub async fn login(
         PasswordEngine::verify(&password_owned, &password_hash)
     })
     .await
-    .map_err(|_| ApiError::Internal)?;
+    .map_err(ApiError::internal)?;
     let record = record.filter(|_| valid).ok_or(ApiError::Unauthorized)?;
 
     let session_token = SecretToken::generate()?;
@@ -149,8 +145,7 @@ pub async fn login(
                 expires_at: Utc::now() + Duration::days(state.config.session_days),
             },
         )
-        .await
-        .map_err(|_| ApiError::Internal)?;
+        .await?;
     Ok(IssuedSession {
         session_token: session_token.plaintext,
         csrf_token: csrf_token.plaintext,
@@ -161,14 +156,13 @@ pub async fn me(state: &AppState, session: &SessionRecord) -> Result<MeView, Api
     let organizations = state
         .store
         .organizations_for_user(session.user_id)
-        .await
-        .map_err(|_| ApiError::Internal)?
+        .await?
         .into_iter()
         .map(|membership| {
             let role = membership
                 .role
                 .parse::<Role>()
-                .map_err(|_| ApiError::Internal)?;
+                .map_err(ApiError::internal)?;
             Ok(OrganizationView {
                 membership,
                 capabilities: role.capabilities(),
@@ -194,27 +188,25 @@ pub async fn change_password(
     let login = state
         .store
         .login_record(&session.email)
-        .await
-        .map_err(|_| ApiError::Internal)?
+        .await?
         .ok_or(ApiError::Unauthorized)?;
     let current_owned = current_password.to_owned();
     let current_hash = login.password_hash;
     let valid =
         tokio::task::spawn_blocking(move || PasswordEngine::verify(&current_owned, &current_hash))
             .await
-            .map_err(|_| ApiError::Internal)?;
+            .map_err(ApiError::internal)?;
     if !valid {
         return Err(ApiError::Unauthorized);
     }
     let new_owned = new_password.to_owned();
     let new_hash = tokio::task::spawn_blocking(move || PasswordEngine::hash(&new_owned))
         .await
-        .map_err(|_| ApiError::Internal)??;
-    state
+        .map_err(ApiError::internal)??;
+    Ok(state
         .store
         .change_password_and_revoke_other_sessions(session.user_id, session.session_id, &new_hash)
-        .await
-        .map_err(|_| ApiError::Internal)
+        .await?)
 }
 
 fn map_database_error(error: sqlx::Error) -> ApiError {
@@ -224,6 +216,6 @@ fn map_database_error(error: sqlx::Error) -> ApiError {
     {
         ApiError::Conflict("email_already_registered")
     } else {
-        ApiError::Internal
+        error.into()
     }
 }

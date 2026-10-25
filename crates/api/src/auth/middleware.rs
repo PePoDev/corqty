@@ -24,8 +24,7 @@ pub async fn authenticate(
     let session = state
         .store
         .session_by_token_hash(&SecretToken::hash(&token))
-        .await
-        .map_err(|_| ApiError::Internal)?
+        .await?
         .ok_or(ApiError::Unauthorized)?;
     request.extensions_mut().insert(session);
     Ok(next.run(request).await)

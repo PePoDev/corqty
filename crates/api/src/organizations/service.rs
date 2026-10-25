@@ -31,9 +31,8 @@ pub async fn create(
         if prefix.is_empty() { "org" } else { &prefix },
         &organization_id.simple().to_string()[..8]
     );
-    state
+    Ok(state
         .store
         .create_organization(session.user_id, organization_id, name.as_str(), &slug)
-        .await
-        .map_err(|_| ApiError::Internal)
+        .await?)
 }

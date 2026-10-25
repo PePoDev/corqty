@@ -1,13 +1,13 @@
 use axum::{
     Extension, Json,
-    extract::{Path, Query, State},
+    extract::{Query, State},
 };
 use corqty_domain::rbac::Capability;
 use corqty_persistence::models::SessionRecord;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{authz::authorize, error::ApiError, state::AppState};
+use crate::{authz::authorize, error::ApiError, extract::ApiPath, state::AppState};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,7 +24,7 @@ pub struct AuditResponse {
 pub async fn list(
     State(state): State<AppState>,
     Extension(session): Extension<SessionRecord>,
-    Path(organization_id): Path<Uuid>,
+    ApiPath(organization_id): ApiPath<Uuid>,
     Query(query): Query<AuditQuery>,
 ) -> Result<Json<AuditResponse>, ApiError> {
     let mut access = authorize(
@@ -40,8 +40,7 @@ pub async fn list(
         query.before_id,
         query.limit.unwrap_or(50),
     )
-    .await
-    .map_err(|_| ApiError::Internal)?;
+    .await?;
     access.commit().await?;
     Ok(Json(AuditResponse { items }))
 }

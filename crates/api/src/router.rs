@@ -4,11 +4,13 @@ use axum::{
     middleware,
     routing::{get, post},
 };
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 use crate::{
     audit,
     auth::{handlers, middleware as auth_middleware},
+    error::ApiError,
     organizations,
     state::AppState,
 };
@@ -57,6 +59,13 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api/v1", public.merge(protected))
-        .layer(TraceLayer::new_for_http())
+        // `method_not_allowed_fallback` only reaches routes added before it.
+        .fallback(|| async { ApiError::NotFound })
+        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(state)
 }

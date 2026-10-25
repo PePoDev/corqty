@@ -26,11 +26,9 @@ pub async fn authorize(
     let mut tx = state
         .store
         .begin_tenant(session.user_id, organization_id)
-        .await
-        .map_err(|_| ApiError::Internal)?;
+        .await?;
     let role = member_role(&mut tx, organization_id, session.user_id)
-        .await
-        .map_err(|_| ApiError::Internal)?
+        .await?
         .ok_or(ApiError::NotFound)?;
     if !role.allows(capability) {
         return Err(ApiError::Forbidden);
@@ -53,7 +51,7 @@ impl OrgAccess {
             {
                 ApiError::Conflict("final_admin_required")
             } else {
-                ApiError::Internal
+                error.into()
             }
         })
     }
