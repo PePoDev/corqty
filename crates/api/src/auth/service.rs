@@ -1,5 +1,8 @@
 use chrono::{Duration, Utc};
-use corqty_domain::account::{NormalizedEmail, OrganizationName, validate_password};
+use corqty_domain::{
+    account::{NormalizedEmail, OrganizationName, validate_password},
+    rbac::{Capability, Role},
+};
 use corqty_persistence::{
     auth::{NewRegistration, NewSession},
     models::{OrganizationMembershipRecord, SessionRecord},
@@ -25,9 +28,16 @@ pub struct UserView {
 }
 
 #[derive(Serialize)]
+pub struct OrganizationView {
+    #[serde(flatten)]
+    pub membership: OrganizationMembershipRecord,
+    pub capabilities: Vec<Capability>,
+}
+
+#[derive(Serialize)]
 pub struct MeView {
     pub user: UserView,
-    pub organizations: Vec<OrganizationMembershipRecord>,
+    pub organizations: Vec<OrganizationView>,
 }
 
 pub async fn register(
@@ -152,7 +162,19 @@ pub async fn me(state: &AppState, session: &SessionRecord) -> Result<MeView, Api
         .store
         .organizations_for_user(session.user_id)
         .await
-        .map_err(|_| ApiError::Internal)?;
+        .map_err(|_| ApiError::Internal)?
+        .into_iter()
+        .map(|membership| {
+            let role = membership
+                .role
+                .parse::<Role>()
+                .map_err(|_| ApiError::Internal)?;
+            Ok(OrganizationView {
+                membership,
+                capabilities: role.capabilities(),
+            })
+        })
+        .collect::<Result<_, ApiError>>()?;
     Ok(MeView {
         user: UserView {
             id: session.user_id,

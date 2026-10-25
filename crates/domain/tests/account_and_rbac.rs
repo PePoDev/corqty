@@ -41,6 +41,25 @@ fn fixed_roles_match_the_approved_permission_matrix() {
 }
 
 #[test]
+fn roles_list_their_capabilities_in_matrix_order() {
+    assert_eq!(Role::Admin.capabilities(), Capability::ALL);
+    assert_eq!(
+        Role::Editor.capabilities(),
+        [
+            Capability::ViewOrganization,
+            Capability::EditWorkflows,
+            Capability::PublishWorkflows,
+            Capability::RunWorkflows,
+        ]
+    );
+    assert_eq!(
+        Role::Runner.capabilities(),
+        [Capability::ViewOrganization, Capability::RunWorkflows]
+    );
+    assert_eq!(Role::Viewer.capabilities(), [Capability::ViewOrganization]);
+}
+
+#[test]
 fn roles_round_trip_as_snake_case() {
     for (text, role) in [
         ("admin", Role::Admin),
