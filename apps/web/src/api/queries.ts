@@ -1,7 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { api } from "@/api/client"
-import type { AuditEvent, Invitation, Member, Role } from "@/api/types"
+import type {
+  AuditEvent,
+  Blueprint,
+  Invitation,
+  Member,
+  NodeDefinition,
+  Role,
+  Workflow,
+  WorkflowSummary,
+} from "@/api/types"
 
 export const queryKeys = {
   organization: (organizationId: string) => ["orgs", organizationId] as const,
@@ -9,6 +18,14 @@ export const queryKeys = {
     ["orgs", organizationId, "members"] as const,
   auditEvents: (organizationId: string) =>
     ["orgs", organizationId, "audit-events"] as const,
+  workflows: (organizationId: string) =>
+    ["orgs", organizationId, "workflows"] as const,
+  workflow: (organizationId: string, workflowId: string) =>
+    ["orgs", organizationId, "workflows", workflowId] as const,
+  nodeDefinitions: (organizationId: string) =>
+    ["orgs", organizationId, "node-definitions"] as const,
+  blueprints: (organizationId: string) =>
+    ["orgs", organizationId, "blueprints"] as const,
 }
 
 export function useMembers(organizationId: string) {
@@ -30,7 +47,7 @@ export function useAuditEvents(organizationId: string) {
   })
 }
 
-// Member writes also append audit events: refresh the whole organization.
+// Writes also append audit events: refresh the whole organization.
 function useOrganizationMutation<Variables, Result>(
   organizationId: string,
   mutationFn: (variables: Variables) => Promise<Result>,
@@ -72,5 +89,57 @@ export function useRemoveMember(organizationId: string) {
     api<void>(`/orgs/${organizationId}/members/${userId}`, {
       method: "DELETE",
     }),
+  )
+}
+
+export function useWorkflows(organizationId: string) {
+  return useQuery({
+    queryKey: queryKeys.workflows(organizationId),
+    queryFn: ({ signal }) =>
+      api<{ items: WorkflowSummary[] }>(`/orgs/${organizationId}/workflows`, {
+        signal,
+      }),
+  })
+}
+
+export function useWorkflow(organizationId: string, workflowId: string) {
+  return useQuery({
+    queryKey: queryKeys.workflow(organizationId, workflowId),
+    queryFn: ({ signal }) =>
+      api<Workflow>(`/orgs/${organizationId}/workflows/${workflowId}`, {
+        signal,
+      }),
+  })
+}
+
+export function useNodeDefinitions(organizationId: string) {
+  return useQuery({
+    queryKey: queryKeys.nodeDefinitions(organizationId),
+    queryFn: ({ signal }) =>
+      api<{ items: NodeDefinition[] }>(
+        `/orgs/${organizationId}/node-definitions`,
+        { signal },
+      ),
+  })
+}
+
+export function useBlueprints(organizationId: string) {
+  return useQuery({
+    queryKey: queryKeys.blueprints(organizationId),
+    queryFn: ({ signal }) =>
+      api<{ items: Blueprint[] }>(`/orgs/${organizationId}/blueprints`, {
+        signal,
+      }),
+  })
+}
+
+export function useCreateWorkflow(organizationId: string) {
+  return useOrganizationMutation(
+    organizationId,
+    (body: { name: string; blueprintId?: string }) =>
+      api<Workflow>(`/orgs/${organizationId}/workflows`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   )
 }

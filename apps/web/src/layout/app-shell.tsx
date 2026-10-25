@@ -12,6 +12,8 @@ import { Separator } from "@/components/ui/separator"
 
 const links = [
   { label: "Overview", suffix: "" },
+  { label: "Workflows", suffix: "/workflows" },
+  { label: "Catalog", suffix: "/catalog" },
   { label: "Members", suffix: "/members" },
   { label: "Audit log", suffix: "/audit" },
 ]

@@ -51,3 +51,36 @@ export interface AuditEvent {
   metadata: Record<string, unknown>
   occurredAt: string
 }
+
+// The catalog and workflow types list only the fields the UI reads so far;
+// the API sends more (port specs, schemas, graphs).
+export interface NodeDefinition {
+  id: string
+  key: string
+  version: number
+  displayName: string
+  description: string
+  category: string
+  deprecated: boolean
+}
+
+export interface Blueprint {
+  id: string
+  key: string
+  displayName: string
+  description: string
+}
+
+export interface WorkflowSummary {
+  id: string
+  name: string
+  draftRevision: number
+  publishedVersion: number | null
+  updatedAt: string
+}
+
+export interface Workflow {
+  id: string
+  name: string
+  draft: { revision: number }
+}
