@@ -1,7 +1,7 @@
 use corqty_domain::{
-    catalog::FILE_TEXT_MAX_BYTES,
-    diagnostic::Diagnostic,
-    graph::GraphSnapshot,
+    catalog::{FILE_TEXT_MAX_BYTES, MAX_PORTS},
+    diagnostic::{Diagnostic, MAX_DIAGNOSTICS},
+    graph::{GraphSnapshot, MAX_NODES},
     publish::{Definitions, canonical_checksum, validate_graph},
 };
 use serde_json::{Value, json};
@@ -404,6 +404,50 @@ fn a_graph_over_the_limits_gets_only_the_limit_diagnostics() {
     assert_eq!(
         codes(&validate_graph(&graph, &definitions())),
         [("too_many_edges", "/edges")]
+    );
+}
+
+#[test]
+fn a_graph_reports_at_most_two_hundred_diagnostics() {
+    // Each node leaves 50 required inputs unbound: 25,000 problems in all.
+    let ports: Vec<Value> = (0..MAX_PORTS)
+        .map(|index| {
+            json!({"name": format!("p{index}"), "dataType": "core.any", "schema": {}, "required": true})
+        })
+        .collect();
+    let wide = json!({
+        "inputs": ports,
+        "outputs": [],
+        "configSchema": {"type": "object"},
+        "uiSchema": {},
+        "defaults": {},
+        "executor": {"key": "mock", "version": "1.0.0"}
+    });
+    let mut definitions = definitions();
+    definitions.insert(
+        ("acme.wide".to_owned(), 1),
+        serde_json::from_value(wide).unwrap(),
+    );
+    let nodes: Vec<Value> = (0..MAX_NODES)
+        .map(|index| {
+            let mut node = node(&format!("n{index}"));
+            node["definition"]["key"] = json!("acme.wide");
+            node["inputs"] = json!({});
+            node
+        })
+        .collect();
+    let graph = with(&[("/nodes", json!(nodes)), ("/edges", json!([]))]);
+
+    let diagnostics = validate_graph(&graph, &definitions);
+    assert_eq!(diagnostics.len(), MAX_DIAGNOSTICS + 1);
+    assert!(
+        diagnostics[..MAX_DIAGNOSTICS]
+            .iter()
+            .all(|diagnostic| diagnostic.code == "missing_required_input")
+    );
+    assert_eq!(
+        codes(&diagnostics[MAX_DIAGNOSTICS..]),
+        [("too_many_diagnostics", "")]
     );
 }
 

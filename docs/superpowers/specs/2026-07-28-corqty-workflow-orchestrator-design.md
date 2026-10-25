@@ -613,6 +613,7 @@ Each milestone receives its own implementation plan and must leave the repositor
 - Draft saves accept any graph that parses and stays within the size limits; full validation runs only on Validate and Publish. Publishing names an exact draft revision, and each revision is published at most once.
 - Applying a blueprint is `POST /orgs/{org_id}/workflows` with a `blueprintId`; the server copies the graph with fresh node and edge identifiers.
 - Graph and timeout limits are fixed constants in Milestone 2; deployment configuration is deferred to Milestone 5.
+- User JSON Schemas are self-contained (no `$ref`, `$dynamicRef`, or `$recursiveRef`), use Draft 2020-12 throughout, and are at most 16 KiB each. A node definition has at most 50 input ports and 50 output ports, and one validation reports at most 200 diagnostics.
 
 ## 20. Acceptance criteria
 

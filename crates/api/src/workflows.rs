@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::{
     authz::authorize,
-    catalog::Items,
+    catalog::{Items, blocking},
     error::ApiError,
     extract::{ApiJson, ApiPath},
     state::AppState,
@@ -180,7 +180,8 @@ pub async fn validate(
         return Err(ApiError::NotFound);
     }
     let definitions = catalog::definitions_map(&mut access.tx).await?;
-    let diagnostics = validate_graph(&body.graph, &definitions);
+    let (_, diagnostics) =
+        blocking(body.graph, move |graph| validate_graph(graph, &definitions)).await?;
     access.commit().await?;
     Ok(Json(json!({
         "valid": diagnostics.is_empty(),
@@ -234,7 +235,10 @@ pub async fn publish(
         return Err(ApiError::Conflict("draft_already_published"));
     }
     let definitions = catalog::definitions_map(&mut access.tx).await?;
-    let diagnostics = validate_graph(&draft.graph, &definitions);
+    let (graph, diagnostics) = blocking(draft.graph, move |graph| {
+        validate_graph(graph, &definitions)
+    })
+    .await?;
     if !diagnostics.is_empty() {
         return Err(ApiError::Invalid {
             code: "graph_invalid",
@@ -247,8 +251,8 @@ pub async fn publish(
         access.user_id,
         workflow_id,
         draft.revision,
-        &draft.graph,
-        &canonical_checksum(&draft.graph),
+        &graph,
+        &canonical_checksum(&graph),
     )
     .await
     .map_err(map_already_published)?;

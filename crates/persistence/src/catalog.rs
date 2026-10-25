@@ -94,34 +94,42 @@ pub async fn insert_node_definition(
     Ok(record)
 }
 
-/// Deprecates one of the organization's own definitions. System and foreign ids give None.
+/// Deprecates one of the organization's own definitions. An already deprecated one comes
+/// back unchanged and without a second audit row. System and foreign ids give None.
 pub async fn deprecate_node_definition(
     conn: &mut PgConnection,
     organization_id: Uuid,
     actor_user_id: Uuid,
     id: Uuid,
 ) -> Result<Option<NodeDefinitionRecord>, sqlx::Error> {
-    let record: Option<NodeDefinitionRecord> = sqlx::query_as(&format!(
+    let deprecated: Option<NodeDefinitionRecord> = sqlx::query_as(&format!(
         "UPDATE node_definitions
-         SET deprecated_at = COALESCE(deprecated_at, now())
-         WHERE id = $1 AND organization_id = $2
+         SET deprecated_at = now()
+         WHERE id = $1 AND organization_id = $2 AND deprecated_at IS NULL
          RETURNING {DEFINITION}"
     ))
     .bind(id)
     .bind(organization_id)
     .fetch_optional(&mut *conn)
     .await?;
-    if let Some(record) = &record {
-        audit_definition(
-            conn,
-            organization_id,
-            actor_user_id,
-            "node_definition.deprecated",
-            record,
-        )
-        .await?;
-    }
-    Ok(record)
+    let Some(record) = deprecated else {
+        return sqlx::query_as(&format!(
+            "SELECT {DEFINITION} FROM node_definitions WHERE id = $1 AND organization_id = $2"
+        ))
+        .bind(id)
+        .bind(organization_id)
+        .fetch_optional(conn)
+        .await;
+    };
+    audit_definition(
+        conn,
+        organization_id,
+        actor_user_id,
+        "node_definition.deprecated",
+        &record,
+    )
+    .await?;
+    Ok(Some(record))
 }
 
 /// Every definition a graph in the current organization may use, deprecated ones included.

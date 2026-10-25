@@ -150,7 +150,9 @@ pub async fn insert_workflow(
 }
 
 /// Replaces the draft if it is still at `expected_revision` and returns the new revision.
-/// None means the revision moved on or the workflow is not visible; nothing is written then.
+/// None means the revision moved on or the workflow is not visible; the caller then rolls
+/// back. The workflow row is locked before the draft row, in `lock_workflow`'s order, so a
+/// save and a publish of one workflow cannot deadlock.
 pub async fn save_draft(
     conn: &mut PgConnection,
     organization_id: Uuid,
@@ -159,6 +161,10 @@ pub async fn save_draft(
     expected_revision: i64,
     graph: &GraphSnapshot,
 ) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query("UPDATE workflows SET updated_at = now() WHERE id = $1")
+        .bind(workflow_id)
+        .execute(&mut *conn)
+        .await?;
     let revision: Option<i64> = sqlx::query_scalar(
         "UPDATE workflow_drafts
          SET graph = $3, revision = revision + 1, updated_by = $4, updated_at = now()
@@ -174,10 +180,6 @@ pub async fn save_draft(
     let Some(revision) = revision else {
         return Ok(None);
     };
-    sqlx::query("UPDATE workflows SET updated_at = now() WHERE id = $1")
-        .bind(workflow_id)
-        .execute(&mut *conn)
-        .await?;
     let metadata = json!({ "revision": revision });
     audit(
         conn,

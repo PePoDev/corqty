@@ -61,7 +61,7 @@ pub async fn create_node_definition(
 ) -> Result<(StatusCode, Json<NodeDefinitionRecord>), ApiError> {
     let mut access =
         authorize(&state, &session, organization_id, Capability::EditWorkflows).await?;
-    let diagnostics = validate_new_definition(&definition);
+    let (definition, diagnostics) = blocking(definition, validate_new_definition).await?;
     if !diagnostics.is_empty() {
         return Err(ApiError::Invalid {
             code: "node_definition_invalid",
@@ -133,14 +133,14 @@ pub async fn create_blueprint(
         &blueprint.description,
     );
     let definitions = catalog::definitions_map(&mut access.tx).await?;
-    diagnostics.extend(
+    let (blueprint, graph_diagnostics) = blocking(blueprint, move |blueprint| {
         validate_graph(&blueprint.graph, &definitions)
-            .into_iter()
-            .map(|diagnostic| Diagnostic {
-                pointer: format!("/graph{}", diagnostic.pointer),
-                ..diagnostic
-            }),
-    );
+    })
+    .await?;
+    diagnostics.extend(graph_diagnostics.into_iter().map(|diagnostic| Diagnostic {
+        pointer: format!("/graph{}", diagnostic.pointer),
+        ..diagnostic
+    }));
     if !diagnostics.is_empty() {
         return Err(ApiError::Invalid {
             code: "blueprint_invalid",
@@ -156,19 +156,39 @@ pub async fn create_blueprint(
         &blueprint.description,
         &blueprint.graph,
     )
-    .await?;
+    .await
+    .map_err(map_version_conflict)?;
     access.commit().await?;
     Ok((StatusCode::CREATED, Json(record)))
 }
 
+/// Runs `check(&input)` on a blocking thread, so a slow validation never stalls the async
+/// workers, and hands `input` back with the result.
+pub(crate) async fn blocking<T, R>(
+    input: T,
+    check: impl FnOnce(&T) -> R + Send + 'static,
+) -> Result<(T, R), ApiError>
+where
+    T: Send + 'static,
+    R: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let result = check(&input);
+        (input, result)
+    })
+    .await
+    .map_err(ApiError::internal)
+}
+
 /// Two requests computed the same next version; the later insert fails on the unique key.
 fn map_version_conflict(error: sqlx::Error) -> ApiError {
-    if error
+    let code = match error
         .as_database_error()
-        .is_some_and(|database| database.constraint() == Some("node_definitions_key_version"))
+        .and_then(|database| database.constraint())
     {
-        ApiError::Conflict("node_definition_version_conflict")
-    } else {
-        error.into()
-    }
+        Some("node_definitions_key_version") => "node_definition_version_conflict",
+        Some("blueprints_key_version") => "blueprint_version_conflict",
+        _ => return error.into(),
+    };
+    ApiError::Conflict(code)
 }

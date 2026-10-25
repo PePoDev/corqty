@@ -1,10 +1,10 @@
 use corqty_domain::{
     catalog::{
-        FILE_TEXT_MAX_BYTES, NewNodeDefinition, validate_blueprint_metadata, validate_config,
-        validate_new_definition,
+        FILE_TEXT_MAX_BYTES, MAX_PORTS, NewNodeDefinition, validate_blueprint_metadata,
+        validate_config, validate_new_definition,
     },
-    diagnostic::Diagnostic,
-    schema::{DIALECT, compile, instance_errors, schema_errors},
+    diagnostic::{Diagnostic, MAX_DIAGNOSTICS},
+    schema::{DIALECT, MAX_SCHEMA_BYTES, compile, instance_errors, schema_errors},
 };
 use serde_json::{Value, json};
 
@@ -63,6 +63,15 @@ fn text(length: usize) -> Value {
     json!("x".repeat(length))
 }
 
+/// A string schema whose JSON has exactly `bytes` bytes.
+fn schema_of(bytes: usize) -> Value {
+    let padding = bytes
+        - json!({"type": "string", "description": ""})
+            .to_string()
+            .len();
+    json!({"type": "string", "description": "x".repeat(padding)})
+}
+
 fn codes(diagnostics: &[Diagnostic]) -> Vec<(&str, &str)> {
     diagnostics
         .iter()
@@ -82,6 +91,13 @@ fn a_well_formed_definition_has_no_diagnostics() {
         ("/displayName", text(100)),
         ("/description", text(1000)),
         ("/category", text(60)),
+        // Properties may be named like keywords: their values are schemas, not strings.
+        ("/configSchema/properties/$ref", json!({"type": "string"})),
+        (
+            "/configSchema/properties/$schema",
+            json!({"type": "string"}),
+        ),
+        ("/outputs/0/schema", schema_of(MAX_SCHEMA_BYTES)),
     ] {
         let diagnostics = validate_new_definition(&with(pointer, value));
         assert!(diagnostics.is_empty(), "{pointer}: {diagnostics:?}");
@@ -169,6 +185,40 @@ fn each_definition_rule_reports_its_code_at_its_pointer() {
             "/outputs/0/schema",
         ),
         (
+            "/inputs/0/schema",
+            json!({"$defs": {"region": {"type": "string"}}, "$ref": "#/$defs/region"}),
+            "invalid_schema",
+            "/inputs/0/schema",
+        ),
+        (
+            "/outputs/0/schema/$dynamicRef",
+            json!("#"),
+            "invalid_schema",
+            "/outputs/0/schema",
+        ),
+        (
+            "/outputs/0/schema/$recursiveRef",
+            json!("#"),
+            "invalid_schema",
+            "/outputs/0/schema",
+        ),
+        (
+            "/configSchema/properties/script",
+            json!({
+                "$id": "https://example.com/script",
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "string"
+            }),
+            "invalid_schema",
+            "/configSchema",
+        ),
+        (
+            "/outputs/0/schema",
+            schema_of(MAX_SCHEMA_BYTES + 1),
+            "invalid_schema",
+            "/outputs/0/schema",
+        ),
+        (
             "/configSchema/type",
             json!(["object", "null"]),
             "invalid_schema",
@@ -220,6 +270,34 @@ fn each_definition_rule_reports_its_code_at_its_pointer() {
         let diagnostics = validate_new_definition(&with(pointer, value));
         assert_eq!(codes(&diagnostics), [(code, at)], "{pointer}");
     }
+}
+
+#[test]
+fn each_side_has_at_most_fifty_ports() {
+    let ports = |count: usize| -> Value {
+        (0..count)
+            .map(|index| json!({"name": format!("p{index}"), "dataType": "core.any", "schema": {}}))
+            .collect()
+    };
+    assert!(validate_new_definition(&with("/inputs", ports(MAX_PORTS))).is_empty());
+    for side in ["inputs", "outputs"] {
+        let pointer = format!("/{side}");
+        let diagnostics = validate_new_definition(&with(&pointer, ports(MAX_PORTS + 1)));
+        assert_eq!(codes(&diagnostics), [("too_many_ports", pointer.as_str())]);
+    }
+}
+
+#[test]
+fn a_definition_reports_at_most_two_hundred_diagnostics() {
+    let fields: serde_json::Map<String, Value> = (0..2 * MAX_DIAGNOSTICS)
+        .map(|index| (format!("f{index}"), json!({"widget": "text"})))
+        .collect();
+    let diagnostics = validate_new_definition(&with("/uiSchema", Value::Object(fields)));
+    assert_eq!(diagnostics.len(), MAX_DIAGNOSTICS + 1);
+    assert_eq!(
+        codes(&diagnostics[MAX_DIAGNOSTICS..]),
+        [("too_many_diagnostics", "")]
+    );
 }
 
 #[test]
@@ -286,10 +364,23 @@ fn config_follows_the_schema_and_the_widget_value_contracts() {
 
 #[test]
 fn schemas_compile_offline_as_draft_2020_12_only() {
+    assert!(compile(&json!({"$schema": DIALECT, "type": "string"})).is_ok());
+    // Even a local reference can make validation exponential, so none is accepted.
     let local_ref =
         json!({"$schema": DIALECT, "$defs": {"id": {"type": "string"}}, "$ref": "#/$defs/id"});
-    assert!(compile(&local_ref).is_ok());
+    assert_eq!(
+        compile(&local_ref).err().as_deref(),
+        Some("Schema references are not supported.")
+    );
     assert!(compile(&json!({"$schema": "http://json-schema.org/draft-07/schema#"})).is_err());
+    let nested_draft_07 = json!({"properties": {"a": {
+        "$id": "https://example.com/a",
+        "$schema": "http://json-schema.org/draft-07/schema#"
+    }}});
+    assert_eq!(
+        compile(&nested_draft_07).err().as_deref(),
+        Some("Only JSON Schema Draft 2020-12 is supported.")
+    );
     assert!(compile(&json!({"$ref": "file:///etc/passwd"})).is_err());
 
     assert_eq!(

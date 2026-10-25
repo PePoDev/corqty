@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// The most diagnostics one validation reports, so a hostile document cannot make the
+/// response huge. Validations stop collecting soon after they pass it.
+pub const MAX_DIAGNOSTICS: usize = 200;
+
 /// One problem in a submitted document, located by an RFC 6901 JSON Pointer
 /// into that document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,6 +22,21 @@ impl Diagnostic {
             message: message.into(),
         }
     }
+}
+
+/// The first `MAX_DIAGNOSTICS` of `diagnostics`, followed by one `too_many_diagnostics`
+/// when there were more.
+#[must_use]
+pub fn capped(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    if diagnostics.len() > MAX_DIAGNOSTICS {
+        diagnostics.truncate(MAX_DIAGNOSTICS);
+        diagnostics.push(Diagnostic::new(
+            "too_many_diagnostics",
+            "",
+            format!("Only the first {MAX_DIAGNOSTICS} problems are listed."),
+        ));
+    }
+    diagnostics
 }
 
 /// One RFC 6901 reference token: `~` becomes `~0` and `/` becomes `~1`.

@@ -307,6 +307,25 @@ async fn drafts_save_only_at_the_current_revision() {
         })
     );
 
+    // PostgreSQL cannot store a NUL character in text or jsonb.
+    let mut nul = graph.clone();
+    nul["nodes"] = json!([node("n0")]);
+    nul["nodes"][0]["displayName"] = json!("Mock\u{0}task");
+    let request = json!({ "revision": 3, "graph": nul }).to_string();
+    assert_eq!(
+        body(
+            admin.request_json(Method::PUT, &draft, &request).await,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+        .await,
+        json!({
+            "type": "about:blank",
+            "title": "Validation failed",
+            "status": 422,
+            "code": "unsupported_character",
+        })
+    );
+
     // The session cookie alone is not enough to write.
     let current = json!({ "revision": 3, "graph": graph }).to_string();
     let response = admin

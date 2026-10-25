@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use jsonschema::Validator;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    catalog::{BUILTIN_EXECUTORS, NodeDefinitionSpec, PortSpec, fits, validate_config},
-    diagnostic::{Diagnostic, pointer_token},
+    catalog::{BUILTIN_EXECUTORS, NodeDefinitionSpec, PortSpec, fits, validate_compiled_config},
+    diagnostic::{Diagnostic, MAX_DIAGNOSTICS, capped, pointer_token},
     graph::{
         GRAPH_SCHEMA_VERSION, GraphSnapshot, InputBinding, MAX_ATTEMPTS, MAX_TIMEOUT_SECONDS,
         check_limits, compatible, has_cycle,
@@ -17,8 +18,9 @@ use crate::{
 /// organization's own.
 pub type Definitions = HashMap<(String, i32), NodeDefinitionSpec>;
 
-/// Every reason `graph` cannot be published, sorted by (pointer, code). Empty means publishable.
-/// An unknown definition or port skips the rules that depend on it, so nothing cascades.
+/// Every reason `graph` cannot be published, sorted by (pointer, code) and capped at
+/// `MAX_DIAGNOSTICS`. Empty means publishable. An unknown definition or port skips the rules
+/// that depend on it, so nothing cascades.
 #[must_use]
 pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<Diagnostic> {
     let mut diagnostics = check_limits(graph);
@@ -59,6 +61,9 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
     // Edges between two different known nodes, for the cycle check.
     let (mut links, mut link_edges) = (Vec::new(), Vec::new());
     for (index, edge) in graph.edges.iter().enumerate() {
+        if diagnostics.len() > MAX_DIAGNOSTICS {
+            break;
+        }
         let pointer = format!("/edges/{index}");
         if !edge_ids.insert(edge.id.as_str()) {
             diagnostics.push(Diagnostic::new(
@@ -149,8 +154,15 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
         ));
     }
 
+    // Each definition's config schema, and each port schema a literal needs, compiles at most
+    // once, however many nodes use it.
+    let mut config_validators: HashMap<(&str, i32), Option<Validator>> = HashMap::new();
+    let mut port_validators: HashMap<(&str, i32, &str), Option<Validator>> = HashMap::new();
     let mut node_ids = HashSet::new();
     for (index, node) in graph.nodes.iter().enumerate() {
+        if diagnostics.len() > MAX_DIAGNOSTICS {
+            break;
+        }
         let pointer = format!("/nodes/{index}");
         if !node_ids.insert(node.id.as_str()) {
             diagnostics.push(Diagnostic::new(
@@ -197,13 +209,21 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
                 "The node definition's executor is not available.",
             ));
         }
-        diagnostics.extend(validate_config(
+        let (key, version) = (node.definition.key.as_str(), node.definition.version);
+        let validator = config_validators
+            .entry((key, version))
+            .or_insert_with(|| compile(&spec.config_schema).ok());
+        diagnostics.extend(validate_compiled_config(
             spec,
+            validator.as_ref(),
             &node.config,
             &format!("{pointer}/config"),
         ));
 
         for (name, binding) in &node.inputs {
+            if diagnostics.len() > MAX_DIAGNOSTICS {
+                break;
+            }
             let at = format!("{pointer}/inputs/{}", pointer_token(name));
             let Some(port) = find_port(&spec.inputs, "input", name, at.clone(), &mut diagnostics)
             else {
@@ -217,14 +237,17 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
                 ));
             }
             match binding {
-                InputBinding::Literal { value } => match compile(&port.schema) {
-                    Ok(validator) => {
-                        for (path, message) in instance_errors(&validator, value) {
+                InputBinding::Literal { value } => match port_validators
+                    .entry((key, version, port.name.as_str()))
+                    .or_insert_with(|| compile(&port.schema).ok())
+                {
+                    Some(validator) => {
+                        for (path, message) in instance_errors(validator, value) {
                             let pointer = format!("{at}/value{path}");
                             diagnostics.push(Diagnostic::new("invalid_literal", pointer, message));
                         }
                     }
-                    Err(_) => diagnostics.push(Diagnostic::new(
+                    None => diagnostics.push(Diagnostic::new(
                         "invalid_literal",
                         format!("{at}/value"),
                         "The input port's schema does not compile.",
@@ -261,7 +284,7 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
     }
 
     diagnostics.sort_by(|a, b| (&a.pointer, &a.code).cmp(&(&b.pointer, &b.code)));
-    diagnostics
+    capped(diagnostics)
 }
 
 /// The lowercase hex SHA-256 of the graph as JSON with sorted object keys. The same graph

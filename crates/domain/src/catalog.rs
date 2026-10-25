@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, HashSet};
 
+use jsonschema::Validator;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
-    diagnostic::{Diagnostic, pointer_token},
+    diagnostic::{Diagnostic, MAX_DIAGNOSTICS, capped, pointer_token},
     graph::{InputBinding, is_valid_data_type},
     schema::{compile, compile_at, instance_errors},
 };
@@ -25,6 +26,8 @@ pub const WIDGETS: [&str; 10] = [
 // ponytail: a static compiled registry; Milestone 3 adds executors that workers advertise.
 pub const BUILTIN_EXECUTORS: &[(&str, &str)] = &[("mock", "1.0.0")];
 pub const FILE_TEXT_MAX_BYTES: usize = 262_144;
+/// The most input ports, and the most output ports, one definition can have.
+pub const MAX_PORTS: usize = 50;
 
 /// What a node definition version does: its typed ports, its configuration form and the
 /// executor that runs it. Stored as the `spec` column.
@@ -96,7 +99,7 @@ pub fn validate_new_definition(definition: &NewNodeDefinition) -> Vec<Diagnostic
         ));
     }
     diagnostics.extend(validate_spec(&definition.spec));
-    diagnostics
+    capped(diagnostics)
 }
 
 /// The key, display name and description rules that organization definitions and blueprints share.
@@ -152,8 +155,19 @@ pub fn validate_blueprint_metadata(
 pub fn validate_spec(spec: &NodeDefinitionSpec) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for (side, ports) in [("inputs", &spec.inputs), ("outputs", &spec.outputs)] {
+        if ports.len() > MAX_PORTS {
+            diagnostics.push(Diagnostic::new(
+                "too_many_ports",
+                format!("/{side}"),
+                format!("A definition can have at most {MAX_PORTS} {side}."),
+            ));
+            continue;
+        }
         let mut names = HashSet::new();
         for (index, port) in ports.iter().enumerate() {
+            if diagnostics.len() > MAX_DIAGNOSTICS {
+                break;
+            }
             let pointer = format!("/{side}/{index}");
             let valid_name = port
                 .name
@@ -208,6 +222,9 @@ pub fn validate_spec(spec: &NodeDefinitionSpec) -> Vec<Diagnostic> {
 
     let properties = spec.config_schema.get("properties");
     for (field, ui) in &spec.ui_schema {
+        if diagnostics.len() > MAX_DIAGNOSTICS {
+            break;
+        }
         let pointer = format!("/uiSchema/{}", pointer_token(field));
         if !WIDGETS.contains(&ui.widget.as_str()) {
             diagnostics.push(Diagnostic::new(
@@ -254,14 +271,27 @@ pub fn validate_config(
     config: &Value,
     pointer_prefix: &str,
 ) -> Vec<Diagnostic> {
-    let Ok(validator) = compile(&spec.config_schema) else {
+    let validator = compile(&spec.config_schema).ok();
+    validate_compiled_config(spec, validator.as_ref(), config, pointer_prefix)
+}
+
+/// `validate_config` with the config schema already compiled, so a graph compiles each
+/// definition's schema once. `None` means the schema does not compile.
+#[must_use]
+pub fn validate_compiled_config(
+    spec: &NodeDefinitionSpec,
+    validator: Option<&Validator>,
+    config: &Value,
+    pointer_prefix: &str,
+) -> Vec<Diagnostic> {
+    let Some(validator) = validator else {
         return vec![Diagnostic::new(
             "invalid_config",
             pointer_prefix,
             "The node definition's config schema does not compile.",
         )];
     };
-    let mut diagnostics: Vec<Diagnostic> = instance_errors(&validator, config)
+    let mut diagnostics: Vec<Diagnostic> = instance_errors(validator, config)
         .into_iter()
         .map(|(path, message)| {
             Diagnostic::new("invalid_config", format!("{pointer_prefix}{path}"), message)

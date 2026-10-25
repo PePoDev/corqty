@@ -1,3 +1,5 @@
+use std::pin::pin;
+
 use corqty_domain::{
     catalog::{NewNodeDefinition, validate_new_definition},
     graph::GraphSnapshot,
@@ -648,4 +650,51 @@ async fn concurrent_publishes_of_one_revision_store_one_version() {
             ),
         ]
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn draft_saves_lock_the_workflow_before_the_draft_like_publishes() {
+    let fixture = Fixture::new().await;
+    let (a, editor) = (fixture.org_a, fixture.editor);
+    let empty = GraphSnapshot::empty();
+    let mut tx = fixture.tx(editor, a).await;
+    let workflow = workflows::insert_workflow(&mut tx, a, editor, "Race", "race", &empty, None)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    // A publish has locked the workflow row and is about to lock the draft row.
+    let owner = &fixture.database.owner;
+    let mut publishing = owner.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM workflows WHERE id = $1 FOR UPDATE")
+        .bind(workflow.id)
+        .execute(&mut *publishing)
+        .await
+        .unwrap();
+    let mut save = pin!(async {
+        let mut tx = fixture.tx(editor, a).await;
+        let saved = workflows::save_draft(&mut tx, a, editor, workflow.id, 1, &empty)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        saved
+    });
+    let waiting =
+        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted)";
+    tokio::select! {
+        saved = &mut save => panic!("the save did not wait: {saved:?}"),
+        () = async {
+            while !sqlx::query_scalar::<_, bool>(waiting).fetch_one(owner).await.unwrap() {}
+        } => {}
+    }
+    // The waiting save holds no lock on the draft yet, so the publish takes it at once
+    // instead of deadlocking with the save.
+    sqlx::query("SELECT 1 FROM workflow_drafts WHERE workflow_id = $1 FOR UPDATE NOWAIT")
+        .bind(workflow.id)
+        .execute(&mut *publishing)
+        .await
+        .unwrap();
+    publishing.commit().await.unwrap();
+    assert_eq!(save.await, Some(2));
 }

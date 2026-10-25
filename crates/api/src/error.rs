@@ -47,6 +47,14 @@ impl ApiError {
 
 impl From<sqlx::Error> for ApiError {
     fn from(error: sqlx::Error) -> Self {
+        // 22P05 and 22021: PostgreSQL text and jsonb cannot hold a NUL character.
+        let nul = error
+            .as_database_error()
+            .and_then(|database| database.code())
+            .is_some_and(|code| code == "22P05" || code == "22021");
+        if nul {
+            return Self::Validation("unsupported_character");
+        }
         Self::internal(error)
     }
 }

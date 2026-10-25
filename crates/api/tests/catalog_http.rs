@@ -6,6 +6,7 @@ use axum::{body::to_bytes, http::StatusCode, response::Response};
 use corqty_test_support::TestDatabase;
 use serde_json::{Value, json};
 use serial_test::serial;
+use sqlx::PgPool;
 use support::AuthFixture;
 use uuid::Uuid;
 
@@ -192,6 +193,9 @@ async fn editors_add_and_deprecate_node_definition_versions() {
     assert_eq!(deprecated["id"], ids[0]);
     assert_eq!(deprecated["version"], 1);
     assert_eq!(deprecated["deprecated"], true);
+    // Deprecating again changes nothing, so it writes no second audit event.
+    let again = body(editor.post_json(&deprecate, "").await, StatusCode::OK).await;
+    assert_eq!(again, deprecated);
 
     let outsider = admin
         .register_another("outsider@example.com", "Outside")
@@ -312,6 +316,34 @@ async fn editors_add_blueprints_whose_graphs_pass_publish_validation() {
     );
 }
 
+/// Posts `request` to `path` while another transaction holds an uncommitted version 1 of the
+/// same key, which `insert` adds with the organization id as $1. The request computes
+/// version 1 too and waits on that row's unique key; the other transaction then commits.
+async fn post_during_insert(
+    owner: &PgPool,
+    admin: &AuthFixture,
+    path: &str,
+    request: &str,
+    insert: &str,
+) -> Response {
+    let mut other = owner.begin().await.unwrap();
+    sqlx::query(insert)
+        .bind(admin.organization_id)
+        .execute(&mut *other)
+        .await
+        .unwrap();
+    let mut response = pin!(admin.post_json(path, request));
+    let waiting =
+        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted)";
+    tokio::select! {
+        response = &mut response => panic!("the request did not wait: {}", response.status()),
+        () = async {
+            while !sqlx::query_scalar::<_, bool>(waiting).fetch_one(owner).await.unwrap() {}
+        } => other.commit().await.unwrap(),
+    }
+    response.await
+}
+
 #[tokio::test]
 #[serial]
 async fn a_concurrent_version_of_the_same_key_is_a_conflict() {
@@ -320,27 +352,12 @@ async fn a_concurrent_version_of_the_same_key_is_a_conflict() {
     let admin = AuthFixture::registered("admin@example.com", "Acme").await;
     let definitions = format!("/api/v1/orgs/{}/node-definitions", admin.organization_id);
     let thing = definition("acme.thing").to_string();
-    let mut other = owner.begin().await.unwrap();
-    sqlx::query(
-        "INSERT INTO node_definitions(organization_id, scope, key, version, display_name, category, spec)
-         VALUES ($1, 'organization', 'acme.thing', 1, 'Thing', 'Testing', '{}')",
-    )
-    .bind(admin.organization_id)
-    .execute(&mut *other)
-    .await
-    .unwrap();
-
-    // The request also computes version 1, then waits on the uncommitted row's unique key.
-    let mut request = pin!(admin.post_json(&definitions, &thing));
-    let waiting =
-        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted)";
-    tokio::select! {
-        response = &mut request => panic!("the request did not wait: {}", response.status()),
-        () = async {
-            while !sqlx::query_scalar::<_, bool>(waiting).fetch_one(&owner).await.unwrap() {}
-        } => other.commit().await.unwrap(),
-    }
-    let conflict = body(request.await, StatusCode::CONFLICT).await;
+    let insert = "INSERT INTO node_definitions(
+            organization_id, scope, key, version, display_name, category, spec
+         )
+         VALUES ($1, 'organization', 'acme.thing', 1, 'Thing', 'Testing', '{}')";
+    let response = post_during_insert(&owner, &admin, &definitions, &thing, insert).await;
+    let conflict = body(response, StatusCode::CONFLICT).await;
     assert_eq!(conflict["code"], "node_definition_version_conflict");
     assert_eq!(
         catalog_events(&admin, admin.organization_id).await,
@@ -348,5 +365,38 @@ async fn a_concurrent_version_of_the_same_key_is_a_conflict() {
     );
 
     let (_, retried) = created(admin.post_json(&definitions, &thing).await).await;
+    assert_eq!(retried["version"], 2);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_concurrent_blueprint_of_the_same_key_is_a_conflict() {
+    // `registered` resets the database again; this pool only has to stay connected.
+    let owner = TestDatabase::reset().await.owner;
+    let admin = AuthFixture::registered("admin@example.com", "Acme").await;
+    let blueprints = format!("/api/v1/orgs/{}/blueprints", admin.organization_id);
+    let flow = json!({
+        "key": "acme.flow",
+        "displayName": "Flow",
+        "graph": {
+            "schemaVersion": 1,
+            "workflowInputSchema": { "type": "object", "properties": {} },
+            "nodes": [],
+            "edges": [],
+            "viewport": { "x": 0, "y": 0, "zoom": 1 },
+        },
+    })
+    .to_string();
+    let insert = "INSERT INTO blueprints(organization_id, scope, key, version, display_name, graph)
+         VALUES ($1, 'organization', 'acme.flow', 1, 'Flow', '{}')";
+    let response = post_during_insert(&owner, &admin, &blueprints, &flow, insert).await;
+    let conflict = body(response, StatusCode::CONFLICT).await;
+    assert_eq!(conflict["code"], "blueprint_version_conflict");
+    assert_eq!(
+        catalog_events(&admin, admin.organization_id).await,
+        Vec::<Value>::new()
+    );
+
+    let (_, retried) = created(admin.post_json(&blueprints, &flow).await).await;
     assert_eq!(retried["version"], 2);
 }
