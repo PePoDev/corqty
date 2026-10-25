@@ -168,6 +168,65 @@ async fn catalog_routes_enforce_capabilities() {
 
 #[tokio::test]
 #[serial]
+async fn workflow_routes_enforce_capabilities() {
+    let matrix = Matrix::new().await;
+    let org = format!("/api/v1/orgs/{}", matrix.organization_id);
+    let (_, admin) = &matrix.members[0];
+    let created = admin
+        .post_json(&format!("{org}/workflows"), r#"{"name":"Matrix"}"#)
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let body = to_bytes(created.into_body(), 64 * 1024).await.unwrap();
+    let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let workflow = format!("{org}/workflows/{}", created["id"].as_str().unwrap());
+    let graph = r#"{"schemaVersion":1,"workflowInputSchema":{"type":"object"},"nodes":[],
+        "edges":[],"viewport":{"x":0,"y":0,"zoom":1}}"#;
+    let draft = format!(r#"{{"revision":1,"graph":{graph}}}"#);
+    let validate = format!(r#"{{"graph":{graph}}}"#);
+    for (method, path, body, capability) in [
+        (
+            Method::GET,
+            format!("{org}/workflows"),
+            "",
+            Capability::ViewOrganization,
+        ),
+        (
+            Method::POST,
+            format!("{org}/workflows"),
+            r#"{"name":"Other"}"#,
+            Capability::EditWorkflows,
+        ),
+        (
+            Method::GET,
+            workflow.clone(),
+            "",
+            Capability::ViewOrganization,
+        ),
+        (
+            Method::PUT,
+            format!("{workflow}/draft"),
+            &draft,
+            Capability::EditWorkflows,
+        ),
+        (
+            Method::POST,
+            format!("{workflow}/validate"),
+            &validate,
+            Capability::PublishWorkflows,
+        ),
+        (
+            Method::GET,
+            format!("{workflow}/versions"),
+            "",
+            Capability::ViewOrganization,
+        ),
+    ] {
+        matrix.assert_row(method, &path, body, capability).await;
+    }
+}
+
+#[tokio::test]
+#[serial]
 async fn org_access_commit_reports_the_deferred_final_admin_check_as_conflict() {
     let database = TestDatabase::reset().await;
     let user_id = Uuid::new_v4();

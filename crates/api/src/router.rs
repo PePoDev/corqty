@@ -2,7 +2,7 @@ use axum::{
     Router,
     http::StatusCode,
     middleware,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
@@ -14,6 +14,7 @@ use crate::{
     error::ApiError,
     organizations,
     state::AppState,
+    workflows,
 };
 
 pub fn build_router(state: AppState) -> Router {
@@ -50,6 +51,26 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/orgs/{organization_id}/blueprints",
             get(catalog::list_blueprints).post(catalog::create_blueprint),
+        )
+        .route(
+            "/orgs/{organization_id}/workflows",
+            get(workflows::list_workflows).post(workflows::create_workflow),
+        )
+        .route(
+            "/orgs/{organization_id}/workflows/{workflow_id}",
+            get(workflows::get_workflow),
+        )
+        .route(
+            "/orgs/{organization_id}/workflows/{workflow_id}/draft",
+            put(workflows::save_draft),
+        )
+        .route(
+            "/orgs/{organization_id}/workflows/{workflow_id}/validate",
+            post(workflows::validate),
+        )
+        .route(
+            "/orgs/{organization_id}/workflows/{workflow_id}/versions",
+            get(workflows::list_versions),
         )
         .route(
             "/auth/password",
