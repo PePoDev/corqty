@@ -8,7 +8,7 @@ use corqty_persistence::{catalog, tenant::begin_tenant, workflows};
 use corqty_test_support::TestDatabase;
 use serde_json::{Value, json};
 use serial_test::serial;
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 /// Organization A with one member per role, and organization B with its own admin.
@@ -575,4 +575,77 @@ async fn system_seeds_are_idempotent_and_valid() {
             assert_eq!(node.config, definition.spec.defaults);
         }
     }
+}
+
+/// Publishes the draft the way the API does: lock the workflow, refuse a revision that
+/// already has a version, then store the next version. None means it was refused.
+async fn publish(pool: &PgPool, user: Uuid, organization: Uuid, workflow: Uuid) -> Option<i32> {
+    let mut tx = begin_tenant(pool, user, organization).await.unwrap();
+    let locked = workflows::lock_workflow(&mut tx, workflow)
+        .await
+        .unwrap()
+        .unwrap();
+    let published = workflows::version_exists_for_revision(&mut tx, workflow, locked.revision);
+    if published.await.unwrap() {
+        return None;
+    }
+    let checksum = canonical_checksum(&locked.graph);
+    let version = workflows::insert_version(
+        &mut tx,
+        organization,
+        user,
+        workflow,
+        locked.revision,
+        &locked.graph,
+        &checksum,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    Some(version.version)
+}
+
+#[tokio::test]
+#[serial]
+async fn concurrent_publishes_of_one_revision_store_one_version() {
+    let fixture = Fixture::new().await;
+    let (a, editor) = (fixture.org_a, fixture.editor);
+    let empty = GraphSnapshot::empty();
+    let mut tx = fixture.tx(editor, a).await;
+    let workflow = workflows::insert_workflow(&mut tx, a, editor, "Race", "race", &empty, None)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    // A second pool, so that each publish runs on its own connection at the same time.
+    let options = fixture.database.api.connect_options();
+    let other = PgPool::connect_with((*options).clone()).await.unwrap();
+    let (first, second) = tokio::join!(
+        publish(&fixture.database.api, editor, a, workflow.id),
+        publish(&other, fixture.admin, a, workflow.id),
+    );
+    let mut outcomes = [first, second];
+    outcomes.sort_unstable();
+    assert_eq!(outcomes, [None, Some(1)]);
+
+    let stored: Vec<(i32, i64, Option<i32>)> = sqlx::query_as(
+        "SELECT v.version, v.draft_revision, w.published_version
+         FROM workflow_versions v JOIN workflows w ON w.id = v.workflow_id",
+    )
+    .fetch_all(&fixture.database.owner)
+    .await
+    .unwrap();
+    assert_eq!(stored, [(1, 1, Some(1))]);
+    let checksum = canonical_checksum(&empty);
+    assert_eq!(
+        audit_rows(&fixture.database).await,
+        [
+            audit("workflow.created", workflow.id, json!({})),
+            audit(
+                "workflow.published",
+                workflow.id,
+                json!({"version": 1, "draftRevision": 1, "checksum": checksum})
+            ),
+        ]
+    );
 }

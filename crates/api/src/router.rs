@@ -69,8 +69,16 @@ pub fn build_router(state: AppState) -> Router {
             post(workflows::validate),
         )
         .route(
+            "/orgs/{organization_id}/workflows/{workflow_id}/publish",
+            post(workflows::publish),
+        )
+        .route(
             "/orgs/{organization_id}/workflows/{workflow_id}/versions",
             get(workflows::list_versions),
+        )
+        .route(
+            "/orgs/{organization_id}/workflows/{workflow_id}/versions/{version}",
+            get(workflows::get_version),
         )
         .route(
             "/auth/password",

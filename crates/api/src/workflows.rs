@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use corqty_domain::{
     graph::{GraphSnapshot, check_limits},
-    publish::validate_graph,
+    publish::{canonical_checksum, validate_graph},
     rbac::Capability,
     slug::slugify,
 };
 use corqty_persistence::{
     catalog,
     models::SessionRecord,
-    workflows::{self, VersionSummaryRecord, WorkflowRecord, WorkflowSummaryRecord},
+    workflows::{self, VersionRecord, VersionSummaryRecord, WorkflowRecord, WorkflowSummaryRecord},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -42,6 +42,12 @@ pub struct DraftSave {
 #[serde(deny_unknown_fields)]
 pub struct GraphBody {
     graph: GraphSnapshot,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishDraft {
+    revision: i64,
 }
 
 pub async fn list_workflows(
@@ -200,6 +206,87 @@ pub async fn list_versions(
     let items = workflows::list_versions(&mut access.tx, workflow_id).await?;
     access.commit().await?;
     Ok(Json(Items { items }))
+}
+
+/// Publishes the stored draft, at exactly the revision the client saw, as the workflow's
+/// next version. The workflow stays locked until the commit, so publishes of one workflow
+/// run one at a time and each draft revision becomes at most one version.
+pub async fn publish(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionRecord>,
+    ApiPath((organization_id, workflow_id)): ApiPath<(Uuid, Uuid)>,
+    ApiJson(request): ApiJson<PublishDraft>,
+) -> Result<(StatusCode, Json<VersionSummaryRecord>), ApiError> {
+    let mut access = authorize(
+        &state,
+        &session,
+        organization_id,
+        Capability::PublishWorkflows,
+    )
+    .await?;
+    let draft = workflows::lock_workflow(&mut access.tx, workflow_id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    if draft.revision != request.revision {
+        return Err(ApiError::Conflict("draft_revision_conflict"));
+    }
+    if workflows::version_exists_for_revision(&mut access.tx, workflow_id, draft.revision).await? {
+        return Err(ApiError::Conflict("draft_already_published"));
+    }
+    let definitions = catalog::definitions_map(&mut access.tx).await?;
+    let diagnostics = validate_graph(&draft.graph, &definitions);
+    if !diagnostics.is_empty() {
+        return Err(ApiError::Invalid {
+            code: "graph_invalid",
+            diagnostics,
+        });
+    }
+    let version = workflows::insert_version(
+        &mut access.tx,
+        organization_id,
+        access.user_id,
+        workflow_id,
+        draft.revision,
+        &draft.graph,
+        &canonical_checksum(&draft.graph),
+    )
+    .await
+    .map_err(map_already_published)?;
+    access.commit().await?;
+    Ok((StatusCode::CREATED, Json(version)))
+}
+
+pub async fn get_version(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionRecord>,
+    ApiPath((organization_id, workflow_id, version)): ApiPath<(Uuid, Uuid, i32)>,
+) -> Result<Json<VersionRecord>, ApiError> {
+    let mut access = authorize(
+        &state,
+        &session,
+        organization_id,
+        Capability::ViewOrganization,
+    )
+    .await?;
+    let record = workflows::get_version(&mut access.tx, workflow_id, version)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    access.commit().await?;
+    Ok(Json(record))
+}
+
+/// The unique key that keeps a draft revision from becoming two versions. The workflow
+/// lock already stops a second publish before it gets here; this keeps the answer a 409
+/// if that ever changes.
+fn map_already_published(error: sqlx::Error) -> ApiError {
+    if error
+        .as_database_error()
+        .is_some_and(|database| database.constraint() == Some("workflow_versions_draft_revision"))
+    {
+        ApiError::Conflict("draft_already_published")
+    } else {
+        error.into()
+    }
 }
 
 /// A blueprint's graph with new UUIDs for its nodes and edges, the edges following

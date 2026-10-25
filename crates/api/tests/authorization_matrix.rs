@@ -179,6 +179,11 @@ async fn workflow_routes_enforce_capabilities() {
     let body = to_bytes(created.into_body(), 64 * 1024).await.unwrap();
     let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let workflow = format!("{org}/workflows/{}", created["id"].as_str().unwrap());
+    // Publish version 1, so every role has a version to read.
+    let published = admin
+        .post_json(&format!("{workflow}/publish"), r#"{"revision":1}"#)
+        .await;
+    assert_eq!(published.status(), StatusCode::CREATED);
     let graph = r#"{"schemaVersion":1,"workflowInputSchema":{"type":"object"},"nodes":[],
         "edges":[],"viewport":{"x":0,"y":0,"zoom":1}}"#;
     let draft = format!(r#"{{"revision":1,"graph":{graph}}}"#);
@@ -217,6 +222,18 @@ async fn workflow_routes_enforce_capabilities() {
         (
             Method::GET,
             format!("{workflow}/versions"),
+            "",
+            Capability::ViewOrganization,
+        ),
+        (
+            Method::POST,
+            format!("{workflow}/publish"),
+            r#"{"revision":1}"#,
+            Capability::PublishWorkflows,
+        ),
+        (
+            Method::GET,
+            format!("{workflow}/versions/1"),
             "",
             Capability::ViewOrganization,
         ),
