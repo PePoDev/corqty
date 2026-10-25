@@ -18,7 +18,12 @@ import {
 } from "@xyflow/react"
 import { useState, type DragEvent } from "react"
 
-import type { Blueprint, GraphSnapshot, NodeDefinition } from "@/api/types"
+import type {
+  Blueprint,
+  GraphNode,
+  GraphSnapshot,
+  NodeDefinition,
+} from "@/api/types"
 import {
   connectionError,
   fromFlow,
@@ -28,6 +33,7 @@ import {
   toFlow,
   toFlowNode,
 } from "@/studio/graph-model"
+import { Inspector } from "@/studio/inspector"
 import { BLUEPRINT_TYPE, DEFINITION_TYPE } from "@/studio/palette"
 import { StudioNodeView } from "@/studio/studio-node"
 
@@ -51,6 +57,22 @@ function Canvas({ graph, definitions, blueprints, readOnly }: CanvasProps) {
   const { screenToFlowPosition } = useReactFlow()
 
   const current = () => fromFlow(snapshot, nodes, edges)
+  // The inspector edits a single selected node, otherwise the workflow inputs.
+  const selected = nodes.filter((node) => node.selected)
+
+  function updateNode(node: GraphNode) {
+    setNodes((existing) =>
+      existing.map((candidate) =>
+        candidate.id === node.id
+          ? {
+              ...candidate,
+              ariaLabel: node.displayName,
+              data: { ...candidate.data, node },
+            }
+          : candidate,
+      ),
+    )
+  }
 
   const isValidConnection: IsValidConnection = (connection) =>
     connectionError(current(), definitions, connection) === null
@@ -112,36 +134,48 @@ function Canvas({ graph, definitions, blueprints, readOnly }: CanvasProps) {
   }
 
   return (
-    <div className="flex min-h-96 flex-col">
-      <div className="min-h-0 flex-1">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onConnectEnd={onConnectEnd}
-          isValidConnection={isValidConnection}
-          onDragOver={readOnly ? undefined : onDragOver}
-          onDrop={readOnly ? undefined : onDrop}
-          nodesDraggable={!readOnly}
-          nodesConnectable={!readOnly}
-          deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
-          defaultViewport={graph.viewport}
-          colorMode="system"
+    <div className="grid min-h-0 lg:grid-cols-[1fr_20rem]">
+      <div className="flex min-h-96 flex-col">
+        <div className="min-h-0 flex-1">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onConnectEnd={onConnectEnd}
+            isValidConnection={isValidConnection}
+            onDragOver={readOnly ? undefined : onDragOver}
+            onDrop={readOnly ? undefined : onDrop}
+            nodesDraggable={!readOnly}
+            nodesConnectable={!readOnly}
+            deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
+            defaultViewport={graph.viewport}
+            colorMode="system"
+          >
+            <Background />
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </div>
+        <p
+          role="status"
+          aria-live="polite"
+          className="min-h-9 border-t px-4 py-2 text-sm text-muted-foreground"
         >
-          <Background />
-          <Controls showInteractive={false} />
-        </ReactFlow>
+          {announcement}
+        </p>
       </div>
-      <p
-        role="status"
-        aria-live="polite"
-        className="min-h-9 border-t px-4 py-2 text-sm text-muted-foreground"
-      >
-        {announcement}
-      </p>
+      <Inspector
+        graph={current()}
+        definitions={definitions}
+        nodeId={selected.length === 1 ? selected[0].id : null}
+        readOnly={readOnly}
+        onNodeChange={updateNode}
+        onInputSchemaChange={(workflowInputSchema) =>
+          setSnapshot((existing) => ({ ...existing, workflowInputSchema }))
+        }
+      />
     </div>
   )
 }

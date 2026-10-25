@@ -230,6 +230,38 @@ it("connects compatible ports and announces refused connections", async () => {
   expect(status).toBeEmptyDOMElement()
 })
 
+it("the inspector edits the selected node, or the workflow inputs when none is", async () => {
+  const { container } = renderStudio()
+  const vpc = await screen.findByRole("group", {
+    name: "Create VPC (simulated)",
+  })
+  const inspector = screen.getByRole("complementary", { name: "Inspector" })
+  expect(within(inspector).getByLabelText("Input schema (JSON)")).toHaveValue(
+    JSON.stringify(infrastructure.graph.workflowInputSchema, null, 2),
+  )
+
+  fireEvent.click(vpc)
+  const name = await within(inspector).findByLabelText("Display name")
+  expect(name).toHaveValue("Create VPC (simulated)")
+  // Backspace edits the field; it does not delete the selected node.
+  await userEvent.clear(name)
+  await userEvent.type(name, "Networks{Backspace}")
+  expect(screen.getByRole("group", { name: "Network" })).toBeInTheDocument()
+  expect(container.querySelectorAll(".react-flow__node")).toHaveLength(3)
+
+  fireEvent.click(screen.getByRole("group", { name: "Create RDS (simulated)" }))
+  expect(
+    await within(inspector).findByText("Connected from Network.vpcId"),
+  ).toBeInTheDocument()
+
+  const pane = container.querySelector<HTMLElement>(".react-flow__pane")
+  if (!pane) throw new Error("No pane")
+  fireEvent.click(pane)
+  expect(
+    await within(inspector).findByLabelText("Input schema (JSON)"),
+  ).toBeInTheDocument()
+})
+
 it.each([
   {
     role: "viewer" as const,
@@ -261,5 +293,10 @@ it.each([
     expect(handle("vpc", "out:vpcId")).not.toHaveClass("connectable")
     drop(await findCanvas(), "application/x-corqty-definition", mockTask.id)
     expect(container.querySelectorAll(".react-flow__node")).toHaveLength(3)
+
+    // The inspector shows the selected node but cannot change it.
+    fireEvent.click(vpc)
+    expect(await screen.findByLabelText("Display name")).toBeDisabled()
+    expect(screen.getByLabelText("Max attempts")).toBeDisabled()
   },
 )
