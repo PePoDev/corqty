@@ -4,10 +4,13 @@ import { api } from "@/api/client"
 import type {
   AuditEvent,
   Blueprint,
+  Diagnostic,
+  GraphSnapshot,
   Invitation,
   Member,
   NodeDefinition,
   Role,
+  VersionSummary,
   Workflow,
   WorkflowSummary,
 } from "@/api/types"
@@ -141,5 +144,28 @@ export function useCreateWorkflow(organizationId: string) {
         method: "POST",
         body: JSON.stringify(body),
       }),
+  )
+}
+
+// Validation writes nothing, so nothing needs a refresh.
+export function useValidateWorkflow(
+  organizationId: string,
+  workflowId: string,
+) {
+  return useMutation({
+    mutationFn: (graph: GraphSnapshot) =>
+      api<{ diagnostics: Diagnostic[] }>(
+        `/orgs/${organizationId}/workflows/${workflowId}/validate`,
+        { method: "POST", body: JSON.stringify({ graph }) },
+      ),
+  })
+}
+
+export function usePublishWorkflow(organizationId: string, workflowId: string) {
+  return useOrganizationMutation(organizationId, (revision: number) =>
+    api<VersionSummary>(
+      `/orgs/${organizationId}/workflows/${workflowId}/publish`,
+      { method: "POST", body: JSON.stringify({ revision }) },
+    ),
   )
 }

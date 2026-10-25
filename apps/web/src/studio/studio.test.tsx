@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw/http"
 import { expect, it } from "vitest"
 
-import type { GraphSnapshot } from "@/api/types"
+import type { Diagnostic, GraphSnapshot } from "@/api/types"
 import { AuthGate } from "@/auth/auth-gate"
 import { AppShell } from "@/layout/app-shell"
 import { Studio } from "@/studio/studio"
@@ -23,6 +23,7 @@ import { server } from "@/test/server"
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const mockTask = nodeDefinitions[2] // corqty.mock.task
 const infrastructure = blueprints[1] // corqty.simulated-infrastructure
+const workflowUrl = "/api/v1/orgs/:organizationId/workflows/:workflowId"
 
 // Mirrors the (app) and orgs/[organizationId] layouts around the studio page.
 function renderStudio() {
@@ -38,10 +39,32 @@ function renderStudio() {
 
 function withDraft(graph: GraphSnapshot) {
   server.use(
-    http.get("/api/v1/orgs/:organizationId/workflows/:workflowId", () =>
+    http.get(workflowUrl, () =>
       HttpResponse.json({ ...workflow, draft: { revision: 1, graph } }),
     ),
   )
+}
+
+function problem(status: number, code: string, diagnostics?: Diagnostic[]) {
+  return HttpResponse.json(
+    { type: "about:blank", title: "Problem", status, code, diagnostics },
+    { status },
+  )
+}
+
+// The draft with its VPC node renamed.
+function renamed(displayName: string): GraphSnapshot {
+  const [vpc, ...rest] = infrastructure.graph.nodes
+  return { ...infrastructure.graph, nodes: [{ ...vpc, displayName }, ...rest] }
+}
+
+async function renameVpc(displayName: string) {
+  fireEvent.click(
+    await screen.findByRole("group", { name: "Create VPC (simulated)" }),
+  )
+  const name = await screen.findByLabelText("Display name")
+  await userEvent.clear(name)
+  await userEvent.type(name, displayName)
 }
 
 async function findCanvas() {
@@ -96,6 +119,15 @@ it("shows the draft with typed ports on an editable canvas", async () => {
   expect(
     screen.getByRole("heading", { name: "Provision staging" }),
   ).toBeInTheDocument()
+  const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" })
+  expect(
+    within(breadcrumb).getByRole("link", { name: "Workflows" }),
+  ).toHaveAttribute("href", "/orgs/org-1/workflows")
+  expect(screen.getByText("Saved")).toBeInTheDocument()
+  expect(screen.getByText("rev 3")).toBeInTheDocument()
+  expect(screen.getByText("v1 published")).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Validate" })).toBeEnabled()
+  expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled()
   expect(within(vpc).getByText("Simulated")).toBeInTheDocument()
   expect(vpc).toHaveClass("draggable")
   const output = handle("vpc", "out:vpcId")
@@ -298,5 +330,175 @@ it.each([
     fireEvent.click(vpc)
     expect(await screen.findByLabelText("Display name")).toBeDisabled()
     expect(screen.getByLabelText("Max attempts")).toBeDisabled()
+  },
+)
+
+it("saves the draft once editing pauses", async () => {
+  const saves: unknown[] = []
+  server.use(
+    http.put(`${workflowUrl}/draft`, async ({ request }) => {
+      saves.push(await request.json())
+      return HttpResponse.json({ revision: 4 })
+    }),
+  )
+  renderStudio()
+  await renameVpc("Network")
+  expect(screen.getByText("Saving…")).toBeInTheDocument()
+  expect(
+    await screen.findByText("rev 4", {}, { timeout: 2000 }),
+  ).toBeInTheDocument()
+  expect(screen.getByText("Saved")).toBeInTheDocument()
+  expect(saves).toEqual([{ revision: 3, graph: renamed("Network") }])
+})
+
+it("a conflict stops saving until Reload loads the latest draft", async () => {
+  server.use(
+    http.put(`${workflowUrl}/draft`, () =>
+      problem(409, "draft_revision_conflict"),
+    ),
+  )
+  renderStudio()
+  await renameVpc("Network")
+  const banner = await screen.findByRole("alert", {}, { timeout: 2000 })
+  expect(banner).toHaveTextContent("This draft was saved somewhere else.")
+  expect(screen.getByText("Conflict")).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled()
+
+  server.use(
+    http.get(workflowUrl, () =>
+      HttpResponse.json({
+        ...workflow,
+        draft: { revision: 7, graph: renamed("Remote network") },
+      }),
+    ),
+  )
+  await userEvent.click(within(banner).getByRole("button", { name: "Reload" }))
+  expect(
+    await screen.findByRole("group", { name: "Remote network" }),
+  ).toBeInTheDocument()
+  expect(screen.getByText("rev 7")).toBeInTheDocument()
+  expect(screen.getByText("Saved")).toBeInTheDocument()
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+})
+
+it("Validate saves pending edits first and checks the saved graph", async () => {
+  const requests: unknown[] = []
+  server.use(
+    http.put(`${workflowUrl}/draft`, async ({ request }) => {
+      requests.push(["save", await request.json()])
+      return HttpResponse.json({ revision: 4 })
+    }),
+    http.post(`${workflowUrl}/validate`, async ({ request }) => {
+      requests.push(["validate", await request.json()])
+      return HttpResponse.json({ valid: true, diagnostics: [] })
+    }),
+  )
+  renderStudio()
+  await renameVpc("Network")
+  await userEvent.click(screen.getByRole("button", { name: "Validate" }))
+  expect(await screen.findByText("No problems found.")).toBeInTheDocument()
+  expect(requests).toEqual([
+    ["save", { revision: 3, graph: renamed("Network") }],
+    ["validate", { graph: renamed("Network") }],
+  ])
+  expect(screen.getByText("rev 4")).toBeInTheDocument()
+})
+
+it("publishing an invalid draft lists the problems and marks the node and port", async () => {
+  withDraft({ ...infrastructure.graph, edges: [] })
+  const message = "This input is required: connect an edge or add a binding."
+  const published: unknown[] = []
+  server.use(
+    http.post(`${workflowUrl}/publish`, async ({ request }) => {
+      published.push(await request.json())
+      return problem(422, "graph_invalid", [
+        {
+          code: "missing_required_input",
+          pointer: "/nodes/1/inputs/vpcId",
+          message,
+        },
+        {
+          code: "missing_required_input",
+          pointer: "/nodes/2/inputs/vpcId",
+          message,
+        },
+      ])
+    }),
+  )
+  renderStudio()
+  const rds = await screen.findByRole("group", {
+    name: "Create RDS (simulated)",
+  })
+  await userEvent.click(screen.getByRole("button", { name: "Publish" }))
+  const list = await screen.findByRole("list", { name: "Problems" })
+  expect(
+    within(list)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual([
+    `Create RDS (simulated) · vpcId ${message} missing_required_input`,
+    `Deploy service (simulated) · vpcId ${message} missing_required_input`,
+  ])
+  expect(screen.getByText("2 problems found.")).toBeInTheDocument()
+  expect(published).toEqual([{ revision: 1 }])
+
+  expect(rds.firstElementChild).toHaveAttribute("data-invalid")
+  const port = handle("rds", "in:vpcId").parentElement
+  expect(port).toHaveAttribute("data-invalid")
+  expect(
+    within(port as HTMLElement).getByRole("img", { name: "Has a problem" }),
+  ).toBeInTheDocument()
+  const vpc = screen.getByRole("group", { name: "Create VPC (simulated)" })
+  expect(vpc.firstElementChild).not.toHaveAttribute("data-invalid")
+})
+
+it("publishing reports the new version, then that the draft already has one", async () => {
+  let publishedVersion = 1
+  server.use(
+    http.get(workflowUrl, () =>
+      HttpResponse.json({ ...workflow, publishedVersion }),
+    ),
+    http.post(`${workflowUrl}/publish`, () => {
+      if (publishedVersion === 2) return problem(409, "draft_already_published")
+      publishedVersion = 2
+      return HttpResponse.json(
+        {
+          id: "version-2",
+          version: 2,
+          checksum: "0".repeat(64),
+          draftRevision: 3,
+          publishedAt: "2026-10-26T00:00:00Z",
+        },
+        { status: 201 },
+      )
+    }),
+  )
+  renderStudio()
+  await screen.findByRole("group", { name: "Create VPC (simulated)" })
+  expect(screen.getByText("v1 published")).toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole("button", { name: "Publish" }))
+  expect(await screen.findByText("Published v2.")).toBeInTheDocument()
+  expect(screen.getByText("v2 published")).toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole("button", { name: "Publish" }))
+  expect(
+    await screen.findByText("Already published as v2."),
+  ).toBeInTheDocument()
+})
+
+it.each(["runner", "viewer"] as const)(
+  "a %s cannot validate or publish",
+  async (role) => {
+    server.use(http.get("/api/v1/auth/me", () => HttpResponse.json(meAs(role))))
+    renderStudio()
+    await screen.findByRole("group", { name: "Create VPC (simulated)" })
+    expect(screen.getByText("rev 3")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Validate" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Publish" }),
+    ).not.toBeInTheDocument()
   },
 )

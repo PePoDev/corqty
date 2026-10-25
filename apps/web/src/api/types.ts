@@ -139,5 +139,10 @@ export interface WorkflowSummary {
 export interface Workflow {
   id: string
   name: string
+  publishedVersion: number | null
   draft: { revision: number; graph: GraphSnapshot }
+}
+
+export interface VersionSummary {
+  version: number
 }

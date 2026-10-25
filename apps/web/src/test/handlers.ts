@@ -325,10 +325,12 @@ export const blueprints: Blueprint[] = [
 export const workflow: Workflow = {
   id: "wf-2",
   name: "Provision staging",
+  publishedVersion: 1,
   draft: { revision: 3, graph: blueprints[1].graph },
 }
 
-// A signed-in admin of org-1 reading data; tests override writes and failures.
+// A signed-in admin of org-1 who reads data and saves drafts; tests override
+// other writes and failures.
 export const handlers = [
   http.get("/api/v1/auth/me", () => HttpResponse.json(meAs("admin"))),
   http.get("/api/v1/orgs/:organizationId/members", () =>
@@ -342,6 +344,13 @@ export const handlers = [
   ),
   http.get("/api/v1/orgs/:organizationId/workflows/:workflowId", () =>
     HttpResponse.json(workflow),
+  ),
+  http.put(
+    "/api/v1/orgs/:organizationId/workflows/:workflowId/draft",
+    async ({ request }) => {
+      const { revision } = (await request.json()) as { revision: number }
+      return HttpResponse.json({ revision: revision + 1 })
+    },
   ),
   http.get("/api/v1/orgs/:organizationId/node-definitions", () =>
     HttpResponse.json({ items: nodeDefinitions }),

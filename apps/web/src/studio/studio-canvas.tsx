@@ -16,7 +16,7 @@ import {
   type NodeTypes,
   type OnConnectEnd,
 } from "@xyflow/react"
-import { useState, type DragEvent } from "react"
+import { useEffect, useState, type DragEvent } from "react"
 
 import type {
   Blueprint,
@@ -24,6 +24,7 @@ import type {
   GraphSnapshot,
   NodeDefinition,
 } from "@/api/types"
+import type { MappedDiagnostic } from "@/studio/diagnostics"
 import {
   connectionError,
   fromFlow,
@@ -35,7 +36,7 @@ import {
 } from "@/studio/graph-model"
 import { Inspector } from "@/studio/inspector"
 import { BLUEPRINT_TYPE, DEFINITION_TYPE } from "@/studio/palette"
-import { StudioNodeView } from "@/studio/studio-node"
+import { DiagnosticsContext, StudioNodeView } from "@/studio/studio-node"
 
 const nodeTypes = { step: StudioNodeView } satisfies NodeTypes
 
@@ -44,12 +45,20 @@ type CanvasProps = {
   definitions: NodeDefinition[]
   blueprints: Blueprint[]
   readOnly: boolean
+  problems: MappedDiagnostic[]
+  onChange: (graph: GraphSnapshot) => void
 }
 
-function Canvas({ graph, definitions, blueprints, readOnly }: CanvasProps) {
+function Canvas({
+  graph,
+  definitions,
+  blueprints,
+  readOnly,
+  problems,
+  onChange,
+}: CanvasProps) {
   const [initial] = useState(() => toFlow(graph, definitions))
   // XYFlow holds the nodes and edges; this holds the rest of the snapshot.
-  // ponytail: edits stay in local state until drafts are saved automatically.
   const [snapshot, setSnapshot] = useState(graph)
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)
@@ -57,6 +66,10 @@ function Canvas({ graph, definitions, blueprints, readOnly }: CanvasProps) {
   const { screenToFlowPosition } = useReactFlow()
 
   const current = () => fromFlow(snapshot, nodes, edges)
+  // The studio saves what the canvas reports.
+  useEffect(() => {
+    onChange(fromFlow(snapshot, nodes, edges))
+  }, [onChange, snapshot, nodes, edges])
   // The inspector edits a single selected node, otherwise the workflow inputs.
   const selected = nodes.filter((node) => node.selected)
 
@@ -137,26 +150,31 @@ function Canvas({ graph, definitions, blueprints, readOnly }: CanvasProps) {
     <div className="grid min-h-0 lg:grid-cols-[1fr_20rem]">
       <div className="flex min-h-96 flex-col">
         <div className="min-h-0 flex-1">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onConnectEnd={onConnectEnd}
-            isValidConnection={isValidConnection}
-            onDragOver={readOnly ? undefined : onDragOver}
-            onDrop={readOnly ? undefined : onDrop}
-            nodesDraggable={!readOnly}
-            nodesConnectable={!readOnly}
-            deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
-            defaultViewport={graph.viewport}
-            colorMode="system"
-          >
-            <Background />
-            <Controls showInteractive={false} />
-          </ReactFlow>
+          <DiagnosticsContext value={problems}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onConnectEnd={onConnectEnd}
+              isValidConnection={isValidConnection}
+              onDragOver={readOnly ? undefined : onDragOver}
+              onDrop={readOnly ? undefined : onDrop}
+              onMoveEnd={(_, viewport) =>
+                setSnapshot((existing) => ({ ...existing, viewport }))
+              }
+              nodesDraggable={!readOnly}
+              nodesConnectable={!readOnly}
+              deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
+              defaultViewport={graph.viewport}
+              colorMode="system"
+            >
+              <Background />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          </DiagnosticsContext>
         </div>
         <p
           role="status"
