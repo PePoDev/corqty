@@ -1,0 +1,20 @@
+{
+  "compatibility": [
+    { "source": "core.string", "target": "core.string", "compatible": true },
+    { "source": "core.integer", "target": "core.number", "compatible": true },
+    { "source": "core.number", "target": "core.integer", "compatible": false },
+    { "source": "aws.vpc-id", "target": "core.any", "compatible": true },
+    { "source": "core.object", "target": "core.any", "compatible": true },
+    { "source": "core.any", "target": "core.string", "compatible": false },
+    { "source": "aws.vpc-id", "target": "core.string", "compatible": false },
+    { "source": "aws.vpc-id", "target": "aws.vpc-id", "compatible": true },
+    { "source": "core.boolean", "target": "core.string", "compatible": false }
+  ],
+  "cycles": [
+    { "name": "self edge", "edges": [["a", "a"]], "hasCycle": true },
+    { "name": "two node loop", "edges": [["a", "b"], ["b", "a"]], "hasCycle": true },
+    { "name": "three node loop", "edges": [["a", "b"], ["b", "c"], ["c", "a"]], "hasCycle": true },
+    { "name": "diamond", "edges": [["a", "b"], ["a", "c"], ["b", "d"], ["c", "d"]], "hasCycle": false },
+    { "name": "disconnected", "edges": [["a", "b"], ["c", "d"]], "hasCycle": false }
+  ]
+}

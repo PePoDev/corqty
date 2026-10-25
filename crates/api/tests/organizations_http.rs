@@ -20,12 +20,18 @@ async fn authenticated_user_can_create_a_second_organization() {
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::COOKIE, fixture.cookie_header())
                 .header("x-csrf-token", &fixture.csrf)
-                .body(Body::from(r#"{"name":"Second Org"}"#))
+                .body(Body::from(r#"{"name":"Acme  Cloud"}"#))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
+    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let slug = created["slug"].as_str().unwrap();
+    // One separator per gap between words, then an 8-character random suffix.
+    assert!(slug.starts_with("acme-cloud-"), "{slug}");
+    assert_eq!(slug.len(), "acme-cloud-".len() + 8, "{slug}");
 
     let me = fixture
         .app

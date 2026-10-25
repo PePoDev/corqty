@@ -9,3 +9,13 @@ pub struct Diagnostic {
     pub pointer: String,
     pub message: String,
 }
+
+impl Diagnostic {
+    pub fn new(code: &str, pointer: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.to_owned(),
+            pointer: pointer.into(),
+            message: message.into(),
+        }
+    }
+}

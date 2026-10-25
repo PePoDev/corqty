@@ -2,6 +2,7 @@ use chrono::{Duration, Utc};
 use corqty_domain::{
     account::{NormalizedEmail, OrganizationName, validate_password},
     rbac::{Capability, Role},
+    slug::slugify,
 };
 use corqty_persistence::{
     auth::{NewRegistration, NewSession},
@@ -58,31 +59,7 @@ pub async fn register(
     let csrf_token = SecretToken::generate()?;
     let user_id = Uuid::new_v4();
     let organization_id = Uuid::new_v4();
-    let slug_prefix: String = organization_name
-        .as_str()
-        .to_lowercase()
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    let organization_slug = format!(
-        "{}-{}",
-        if slug_prefix.is_empty() {
-            "org"
-        } else {
-            &slug_prefix
-        },
-        &organization_id.simple().to_string()[..8]
-    );
+    let organization_slug = slugify(organization_name.as_str(), "org", organization_id);
 
     state
         .store

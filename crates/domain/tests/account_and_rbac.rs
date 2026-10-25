@@ -1,7 +1,9 @@
 use corqty_domain::{
     account::{NormalizedEmail, OrganizationName, validate_password},
     rbac::{Capability, Role},
+    slug::slugify,
 };
+use uuid::Uuid;
 
 #[test]
 fn normalizes_email_and_organization_name() {
@@ -10,6 +12,24 @@ fn normalizes_email_and_organization_name() {
 
     assert_eq!(email.as_str(), "admin@example.com");
     assert_eq!(name.as_str(), "Acme Cloud");
+}
+
+#[test]
+fn slugs_join_ascii_word_runs_and_end_with_a_suffix() {
+    let suffix_source = Uuid::from_u128(0x0123_4567_89ab_cdef_0000_0000_0000_0000);
+
+    assert_eq!(
+        slugify("Acme  Cloud", "org", suffix_source),
+        "acme-cloud-01234567"
+    );
+    assert_eq!(
+        slugify("  Café -- Ops!  ", "org", suffix_source),
+        "caf-ops-01234567"
+    );
+    assert_eq!(
+        slugify("¿?", "workflow", suffix_source),
+        "workflow-01234567"
+    );
 }
 
 #[test]
