@@ -10,6 +10,7 @@ use tracing::Level;
 use crate::{
     audit,
     auth::{handlers, middleware as auth_middleware},
+    catalog,
     error::ApiError,
     organizations,
     state::AppState,
@@ -37,6 +38,18 @@ pub fn build_router(state: AppState) -> Router {
             "/orgs/{organization_id}/members/{target_user_id}",
             axum::routing::patch(organizations::members::change_role)
                 .delete(organizations::members::remove_member),
+        )
+        .route(
+            "/orgs/{organization_id}/node-definitions",
+            get(catalog::list_node_definitions).post(catalog::create_node_definition),
+        )
+        .route(
+            "/orgs/{organization_id}/node-definitions/{definition_id}/deprecate",
+            post(catalog::deprecate_node_definition),
+        )
+        .route(
+            "/orgs/{organization_id}/blueprints",
+            get(catalog::list_blueprints).post(catalog::create_blueprint),
         )
         .route(
             "/auth/password",

@@ -121,6 +121,53 @@ async fn member_and_audit_routes_enforce_capabilities() {
 
 #[tokio::test]
 #[serial]
+async fn catalog_routes_enforce_capabilities() {
+    let matrix = Matrix::new().await;
+    let org = format!("/api/v1/orgs/{}", matrix.organization_id);
+    let definition = r#"{"key":"acme.thing","displayName":"Thing","category":"Testing",
+        "inputs":[],"outputs":[],"configSchema":{"type":"object"},"uiSchema":{},"defaults":{},
+        "executor":{"key":"mock","version":"1.0.0"}}"#;
+    let blueprint = r#"{"key":"acme.pipeline","displayName":"Pipeline","graph":{
+        "schemaVersion":1,"workflowInputSchema":{"type":"object"},"nodes":[],"edges":[],
+        "viewport":{"x":0,"y":0,"zoom":1}}}"#;
+    for (method, path, body, capability) in [
+        (
+            Method::GET,
+            format!("{org}/node-definitions"),
+            "",
+            Capability::ViewOrganization,
+        ),
+        (
+            Method::POST,
+            format!("{org}/node-definitions"),
+            definition,
+            Capability::EditWorkflows,
+        ),
+        (
+            Method::POST,
+            format!("{org}/node-definitions/00000000-0000-7000-8000-000000000001/deprecate"),
+            "",
+            Capability::EditWorkflows,
+        ),
+        (
+            Method::GET,
+            format!("{org}/blueprints"),
+            "",
+            Capability::ViewOrganization,
+        ),
+        (
+            Method::POST,
+            format!("{org}/blueprints"),
+            blueprint,
+            Capability::EditWorkflows,
+        ),
+    ] {
+        matrix.assert_row(method, &path, body, capability).await;
+    }
+}
+
+#[tokio::test]
+#[serial]
 async fn org_access_commit_reports_the_deferred_final_admin_check_as_conflict() {
     let database = TestDatabase::reset().await;
     let user_id = Uuid::new_v4();
