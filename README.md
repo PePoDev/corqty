@@ -2,6 +2,9 @@
 
 Generic visual workflow orchestration. Milestone 1 provides the multi-tenant
 account, RBAC, audit, API, React shell, PostgreSQL, and Docker foundations.
+Milestone 2 adds the workflow catalog and studio: versioned node definitions
+and blueprints, a Next.js and XYFlow editor with typed connections and
+automatic draft saves, and validated, immutable published versions.
 
 ## Local start
 
