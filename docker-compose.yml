@@ -3,8 +3,9 @@ services:
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-corqty}
-      POSTGRES_USER: ${POSTGRES_OWNER_USER:-corqty_owner}
-      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD:-corqty_owner_dev}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres_dev}
+      CORQTY_OWNER_DB_PASSWORD: ${CORQTY_OWNER_DB_PASSWORD:-corqty_owner_dev}
       CORQTY_API_DB_PASSWORD: ${CORQTY_API_DB_PASSWORD:-corqty_api_dev}
       CORQTY_WORKER_DB_PASSWORD: ${CORQTY_WORKER_DB_PASSWORD:-corqty_worker_dev}
     ports:
@@ -16,7 +17,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_OWNER_USER:-corqty_owner} -d ${POSTGRES_DB:-corqty}",
+          "pg_isready -h 127.0.0.1 -U postgres -d ${POSTGRES_DB:-corqty}",
         ]
       interval: 2s
       timeout: 3s

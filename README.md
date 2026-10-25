@@ -33,3 +33,6 @@ The test database is disposable:
 ```powershell
 docker compose -f docker-compose.test.yml down -v
 ```
+
+After upgrading to Milestone 2, recreate local databases once:
+`docker compose down -v` and `docker compose -f docker-compose.test.yml down -v`.
