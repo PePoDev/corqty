@@ -52,8 +52,28 @@ export interface AuditEvent {
   occurredAt: string
 }
 
-// The catalog and workflow types list only the fields the UI reads so far;
-// the API sends more (port specs, schemas, graphs).
+// The catalog and workflow types list only the fields the UI reads; the API
+// also sends scope, slugs and timestamps.
+export type JsonSchema = {
+  [keyword: string]: unknown
+  properties?: Record<string, JsonSchema>
+  required?: string[]
+}
+
+export interface PortSpec {
+  name: string
+  dataType: string
+  schema: JsonSchema
+  required: boolean
+  description: string
+}
+
+export interface UiField {
+  widget: string
+  label?: string | null
+  help?: string | null
+}
+
 export interface NodeDefinition {
   id: string
   key: string
@@ -62,6 +82,42 @@ export interface NodeDefinition {
   description: string
   category: string
   deprecated: boolean
+  inputs: PortSpec[]
+  outputs: PortSpec[]
+  configSchema: JsonSchema
+  uiSchema: Record<string, UiField>
+  defaults: Record<string, unknown>
+  executor: { key: string; version: string }
+}
+
+export type InputBinding =
+  | { kind: "literal"; value: unknown }
+  | { kind: "workflowInput"; pointer: string }
+  | { kind: "secret"; secretId: string }
+
+export interface GraphNode {
+  id: string
+  definition: { key: string; version: number }
+  displayName: string
+  position: { x: number; y: number }
+  config: Record<string, unknown>
+  inputs: Record<string, InputBinding>
+  retry: { maxAttempts: number }
+  timeoutSeconds: number
+}
+
+export interface GraphEdge {
+  id: string
+  source: { nodeId: string; port: string }
+  target: { nodeId: string; port: string }
+}
+
+export interface GraphSnapshot {
+  schemaVersion: number
+  workflowInputSchema: JsonSchema
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  viewport: { x: number; y: number; zoom: number }
 }
 
 export interface Blueprint {
@@ -69,6 +125,7 @@ export interface Blueprint {
   key: string
   displayName: string
   description: string
+  graph: GraphSnapshot
 }
 
 export interface WorkflowSummary {
@@ -82,5 +139,5 @@ export interface WorkflowSummary {
 export interface Workflow {
   id: string
   name: string
-  draft: { revision: number }
+  draft: { revision: number; graph: GraphSnapshot }
 }

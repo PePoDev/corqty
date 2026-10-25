@@ -80,6 +80,13 @@
   --sidebar-accent: oklch(0.269 0 0);
 }
 
+/* The studio canvas uses the same semantic tokens in both themes. */
+.react-flow {
+  --xy-background-color: var(--background);
+  --xy-node-border: 1px solid var(--border);
+  --xy-edge-stroke: var(--muted-foreground);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
