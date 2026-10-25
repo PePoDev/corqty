@@ -1,3 +1,5 @@
+"use client"
+
 import { useAuditEvents } from "@/api/queries"
 import {
   Table,
@@ -8,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-export function AuditPage({ organizationId }: { organizationId: string }) {
+export function AuditView({ organizationId }: { organizationId: string }) {
   const auditEvents = useAuditEvents(organizationId)
 
   return (

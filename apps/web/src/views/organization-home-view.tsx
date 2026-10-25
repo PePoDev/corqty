@@ -1,7 +1,10 @@
-import { useParams } from "react-router-dom"
+"use client"
 
-export function OrganizationHomePage() {
-  const { organizationId } = useParams()
+export function OrganizationHomeView({
+  organizationId,
+}: {
+  organizationId: string
+}) {
   return (
     <section className="flex flex-col gap-2 p-4 md:p-6">
       <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">

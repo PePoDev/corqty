@@ -1,9 +1,13 @@
+"use client"
+
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import type { FormEvent } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import { api } from "@/api/client"
 import { useAuth } from "@/auth/auth-context"
+import { takeReturnTo } from "@/auth/return-to"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -15,26 +19,17 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 
-export function LoginPage() {
+export function LoginView() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const { me, refresh } = useAuth()
-  const location = useLocation()
-  const navigate = useNavigate()
+  const router = useRouter()
 
   useEffect(() => {
-    if (!me) return
-    const from = (
-      location.state as {
-        from?: { pathname: string; search: string; hash: string }
-      } | null
-    )?.from
-    navigate(from ? `${from.pathname}${from.search}${from.hash}` : "/", {
-      replace: true,
-    })
-  }, [location.state, me, navigate])
+    if (me) router.replace(takeReturnTo())
+  }, [me, router])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -98,11 +93,7 @@ export function LoginPage() {
             </Button>
             <p className="text-center text-sm text-muted-foreground">
               New to Corqty?{" "}
-              <Link
-                className="text-foreground underline"
-                state={location.state}
-                to="/register"
-              >
+              <Link className="text-foreground underline" href="/register">
                 Create an account
               </Link>
             </p>

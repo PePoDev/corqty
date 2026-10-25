@@ -1,5 +1,7 @@
+"use client"
+
+import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
-import { useLocation, useNavigate } from "react-router-dom"
 
 import { api } from "@/api/client"
 import { useAuth } from "@/auth/auth-context"
@@ -9,9 +11,8 @@ interface AcceptedInvitation {
   role: string
 }
 
-export function AcceptInvitationPage() {
-  const location = useLocation()
-  const navigate = useNavigate()
+export function AcceptInvitationView() {
+  const router = useRouter()
   const { refresh } = useAuth()
   const [error, setError] = useState("")
   const started = useRef(false)
@@ -19,7 +20,10 @@ export function AcceptInvitationPage() {
   useEffect(() => {
     if (started.current) return
     started.current = true
-    const token = new URLSearchParams(location.hash.slice(1)).get("token")
+    // The token travels in the fragment, so it never reaches a server log.
+    const token = new URLSearchParams(window.location.hash.slice(1)).get(
+      "token",
+    )
     if (!token) {
       setError("This invitation is invalid or expired.")
       return
@@ -30,10 +34,10 @@ export function AcceptInvitationPage() {
     })
       .then(async (accepted) => {
         await refresh()
-        navigate(`/orgs/${accepted.organizationId}`, { replace: true })
+        router.replace(`/orgs/${accepted.organizationId}`)
       })
       .catch(() => setError("This invitation is invalid or expired."))
-  }, [location.hash, navigate, refresh])
+  }, [refresh, router])
 
   return (
     <main className="grid min-h-screen place-items-center p-6">

@@ -11,7 +11,7 @@ docker compose up --build --wait
 ./scripts/smoke-foundation.ps1
 ```
 
-Open http://localhost:5173 and create the first account and organization.
+Open http://localhost:3000 and create the first account and organization.
 The host ports can be changed with `CORQTY_POSTGRES_PORT`,
 `CORQTY_API_PORT`, and `CORQTY_WEB_PORT`.
 

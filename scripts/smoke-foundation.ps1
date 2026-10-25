@@ -1,7 +1,7 @@
 param(
     [string]$ProjectName = "corqty",
     [string]$ApiBase = "http://localhost:8080/api/v1",
-    [string]$WebBase = "http://localhost:5173"
+    [string]$WebBase = "http://localhost:3000"
 )
 
 $ErrorActionPreference = "Stop"

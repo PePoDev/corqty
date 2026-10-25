@@ -1,3 +1,5 @@
+"use client"
+
 import { useState } from "react"
 import type { FormEvent } from "react"
 
@@ -39,7 +41,7 @@ function memberError(problem: unknown, fallback: string) {
     : fallback
 }
 
-export function MembersPage({ organizationId }: { organizationId: string }) {
+export function MembersView({ organizationId }: { organizationId: string }) {
   const { me } = useAuth()
   const canManage = useCan(organizationId, "manage_members")
   const members = useMembers(organizationId)
