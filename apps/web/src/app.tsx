@@ -33,13 +33,8 @@ function useCurrentMembership() {
 
 function MembersRoute() {
   const membership = useCurrentMembership()
-  const { me } = useAuth()
-  return membership && me ? (
-    <MembersPage
-      organizationId={membership.organizationId}
-      currentRole={membership.role}
-      currentUserId={me.user.id}
-    />
+  return membership ? (
+    <MembersPage organizationId={membership.organizationId} />
   ) : (
     <Navigate replace to="/" />
   )

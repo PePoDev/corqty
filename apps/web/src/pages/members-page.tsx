@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useState } from "react"
+import { useState } from "react"
 import type { FormEvent } from "react"
 
-import { ApiProblem, api } from "@/api/client"
-import type { Role } from "@/api/types"
+import { ApiProblem } from "@/api/client"
+import {
+  useChangeMemberRole,
+  useCreateInvitation,
+  useMembers,
+  useRemoveMember,
+} from "@/api/queries"
+import type { Invitation, Role } from "@/api/types"
+import { useAuth } from "@/auth/auth-context"
+import { useCan } from "@/auth/use-can"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
@@ -23,54 +31,32 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-interface Member {
-  userId: string
-  email: string
-  role: Role
-}
-
-interface Invitation {
-  token: string
-  inviteUrl?: string
-  expiresAt: string
-}
-
 const roles: Role[] = ["admin", "editor", "runner", "viewer"]
 
-export function MembersPage({
-  organizationId,
-  currentRole,
-  currentUserId,
-}: {
-  organizationId: string
-  currentRole: Role
-  currentUserId: string
-}) {
-  const [members, setMembers] = useState<Member[]>([])
+function memberError(problem: unknown, fallback: string) {
+  return problem instanceof ApiProblem && problem.code === "final_admin_required"
+    ? "Every organization must keep one admin."
+    : fallback
+}
+
+export function MembersPage({ organizationId }: { organizationId: string }) {
+  const { me } = useAuth()
+  const canManage = useCan(organizationId, "manage_members")
+  const members = useMembers(organizationId)
+  const createInvitation = useCreateInvitation(organizationId)
+  const changeMemberRole = useChangeMemberRole(organizationId)
+  const removeMember = useRemoveMember(organizationId)
   const [showInvite, setShowInvite] = useState(false)
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer")
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [error, setError] = useState("")
-  const admin = currentRole === "admin"
-
-  const load = useCallback(async () => {
-    setMembers(await api<Member[]>(`/orgs/${organizationId}/members`))
-  }, [organizationId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
 
   async function invite(event: FormEvent) {
     event.preventDefault()
     setError("")
     try {
-      const created = await api<Invitation>(
-        `/orgs/${organizationId}/invitations`,
-        { method: "POST", body: JSON.stringify({ email, role }) },
-      )
-      setInvitation(created)
+      setInvitation(await createInvitation.mutateAsync({ email, role }))
       setEmail("")
     } catch {
       setError("The invitation could not be created.")
@@ -80,33 +66,18 @@ export function MembersPage({
   async function changeRole(userId: string, nextRole: Role) {
     setError("")
     try {
-      await api(`/orgs/${organizationId}/members/${userId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ role: nextRole }),
-      })
-      await load()
+      await changeMemberRole.mutateAsync({ userId, role: nextRole })
     } catch (problem) {
-      setError(
-        problem instanceof ApiProblem && problem.code === "final_admin_required"
-          ? "Every organization must keep one admin."
-          : "The member role could not be changed.",
-      )
+      setError(memberError(problem, "The member role could not be changed."))
     }
   }
 
   async function remove(userId: string) {
     setError("")
     try {
-      await api(`/orgs/${organizationId}/members/${userId}`, {
-        method: "DELETE",
-      })
-      await load()
+      await removeMember.mutateAsync(userId)
     } catch (problem) {
-      setError(
-        problem instanceof ApiProblem && problem.code === "final_admin_required"
-          ? "Every organization must keep one admin."
-          : "The member could not be removed.",
-      )
+      setError(memberError(problem, "The member could not be removed."))
     }
   }
 
@@ -130,7 +101,7 @@ export function MembersPage({
             Fixed organization roles and invitations.
           </p>
         </div>
-        {admin && (
+        {canManage && (
           <Button onClick={() => setShowInvite(true)}>Invite member</Button>
         )}
       </header>
@@ -139,7 +110,15 @@ export function MembersPage({
           {error}
         </p>
       )}
-      {admin && (
+      {members.isPending && (
+        <p className="text-sm text-muted-foreground">Loading members…</p>
+      )}
+      {members.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          The members could not be loaded.
+        </p>
+      )}
+      {canManage && (
         <Dialog
           open={showInvite}
           onOpenChange={(open) => {
@@ -222,11 +201,11 @@ export function MembersPage({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {members.map((member) => (
+            {members.data?.map((member) => (
               <TableRow key={member.userId}>
                 <TableCell>{member.email}</TableCell>
                 <TableCell>
-                  {admin ? (
+                  {canManage ? (
                     <select
                       aria-label={`Role for ${member.email}`}
                       className="h-8 rounded-md border bg-background px-2 text-sm"
@@ -249,7 +228,7 @@ export function MembersPage({
                   )}
                 </TableCell>
                 <TableCell className="text-right">
-                  {admin && member.userId !== currentUserId && (
+                  {canManage && member.userId !== me?.user.id && (
                     <Button
                       variant="ghost"
                       size="sm"

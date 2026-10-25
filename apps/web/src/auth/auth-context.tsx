@@ -8,7 +8,7 @@ import {
 } from "react"
 import type { ReactNode } from "react"
 
-import { api } from "@/api/client"
+import { ApiProblem, api } from "@/api/client"
 import type { Me } from "@/api/types"
 
 interface AuthValue {
@@ -25,8 +25,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       setMe(await api<Me>("/auth/me"))
-    } catch {
-      setMe(null)
+    } catch (problem) {
+      if (problem instanceof ApiProblem && problem.status === 401) setMe(null)
     } finally {
       setLoading(false)
     }

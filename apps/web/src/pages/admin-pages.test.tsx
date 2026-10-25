@@ -1,15 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { MemoryRouter } from "react-router-dom"
-import { beforeEach, expect, it, vi } from "vitest"
+import { http, HttpResponse } from "msw/http"
+import { expect, it, vi } from "vitest"
 
 import { App } from "@/app"
-import { AuditPage } from "@/pages/audit-page"
-import { MembersPage } from "@/pages/members-page"
-
-beforeEach(() => {
-  vi.restoreAllMocks()
-})
+import { meAs } from "@/test/handlers"
+import { renderWithProviders } from "@/test/render"
+import { server } from "@/test/server"
 
 it("admin can create an invitation and sees the copyable token", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined)
@@ -17,117 +14,80 @@ it("admin can create an invitation and sees the copyable token", async () => {
     configurable: true,
     value: { writeText },
   })
-  vi.spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(
-      Response.json([
-        { userId: "u1", email: "admin@example.com", role: "admin" },
-      ]),
-    )
-    .mockResolvedValueOnce(
-      Response.json(
-        { token: "invite-once", expiresAt: "2026-08-04T00:00:00Z" },
-        { status: 201 },
-      ),
-    )
-  render(
-    <MemoryRouter>
-      <MembersPage
-        organizationId="org-1"
-        currentRole="admin"
-        currentUserId="u1"
-      />
-    </MemoryRouter>,
+  let invited: unknown
+  server.use(
+    http.post(
+      "/api/v1/orgs/:organizationId/invitations",
+      async ({ request }) => {
+        invited = await request.json()
+        return HttpResponse.json(
+          { token: "invite-once", expiresAt: "2026-08-04T00:00:00Z" },
+          { status: 201 },
+        )
+      },
+    ),
   )
-  await screen.findByText("admin@example.com")
-  await userEvent.click(screen.getByRole("button", { name: "Invite member" }))
+  renderWithProviders(<App />, { route: "/orgs/org-1/members" })
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Invite member" }),
+  )
   await userEvent.type(screen.getByLabelText("Email"), "editor@example.com")
   await userEvent.click(
     screen.getByRole("button", { name: "Create invitation" }),
   )
   expect(await screen.findByText("invite-once")).toBeInTheDocument()
+  expect(invited).toEqual({ email: "editor@example.com", role: "viewer" })
   await userEvent.click(screen.getByRole("button", { name: "Copy link" }))
   expect(writeText).toHaveBeenCalledWith("invite-once")
 })
 
-it("viewer does not see member mutation actions", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    Response.json([
-      { userId: "u1", email: "viewer@example.com", role: "viewer" },
-    ]),
-  )
-  render(
-    <MemoryRouter>
-      <MembersPage
-        organizationId="org-1"
-        currentRole="viewer"
-        currentUserId="u1"
-      />
-    </MemoryRouter>,
-  )
-  await screen.findByText("viewer@example.com")
+it("a viewer sees no invite form or member actions", async () => {
+  server.use(http.get("/api/v1/auth/me", () => HttpResponse.json(meAs("viewer"))))
+  renderWithProviders(<App />, { route: "/orgs/org-1/members" })
+  expect(
+    await screen.findByRole("cell", { name: "admin@example.com" }),
+  ).toBeInTheDocument()
   expect(
     screen.queryByRole("button", { name: "Invite member" }),
   ).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole("button", { name: "Remove" }),
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole("combobox", { name: "Role for admin@example.com" }),
+  ).not.toBeInTheDocument()
+})
+
+it("shows an error when the members cannot be loaded", async () => {
+  server.use(
+    http.get("/api/v1/orgs/:organizationId/members", () =>
+      HttpResponse.json({ code: "internal" }, { status: 500 }),
+    ),
+  )
+  renderWithProviders(<App />, { route: "/orgs/org-1/members" })
+  expect(
+    await screen.findByText("The members could not be loaded."),
+  ).toBeInTheDocument()
 })
 
 it("renders administrative audit events", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    Response.json({
-      items: [
-        {
-          id: 1,
-          actorUserId: "u1",
-          action: "invitation.created",
-          resourceType: "invitation",
-          resourceId: "i1",
-          metadata: { role: "viewer" },
-          occurredAt: "2026-07-28T00:00:00Z",
-        },
-      ],
-    }),
-  )
-  render(
-    <MemoryRouter>
-      <AuditPage organizationId="org-1" />
-    </MemoryRouter>,
-  )
+  renderWithProviders(<App />, { route: "/orgs/org-1/audit" })
   expect(await screen.findByText("invitation.created")).toBeInTheDocument()
 })
 
 it("accepts a fragment invitation and navigates to its organization", async () => {
-  const me = {
-    user: { id: "user-1", email: "editor@example.com" },
-    organizations: [
-      {
-        organizationId: "org-1",
-        name: "Acme",
-        slug: "acme",
-        role: "editor",
-      },
-    ],
-  }
-  const fetchMock = vi
-    .spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(Response.json(me))
-    .mockResolvedValueOnce(
-      Response.json({ organizationId: "org-1", role: "editor" }),
-    )
-    .mockResolvedValueOnce(Response.json(me))
-  render(
-    <MemoryRouter initialEntries={["/invitations/accept#token=invite-once"]}>
-      <App />
-    </MemoryRouter>,
+  let accepted: unknown
+  server.use(
+    http.post("/api/v1/invitations/accept", async ({ request }) => {
+      accepted = await request.json()
+      return HttpResponse.json({ organizationId: "org-1", role: "editor" })
+    }),
   )
-  await waitFor(() => {
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/invitations/accept",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ token: "invite-once" }),
-      }),
-    )
+  renderWithProviders(<App />, {
+    route: "/invitations/accept#token=invite-once",
   })
   expect(
     await screen.findByRole("heading", { name: "Organization ready" }),
   ).toBeInTheDocument()
+  expect(accepted).toEqual({ token: "invite-once" })
 })
