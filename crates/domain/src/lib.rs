@@ -5,6 +5,7 @@ pub mod catalog;
 pub mod diagnostic;
 pub mod error;
 pub mod graph;
+pub mod publish;
 pub mod rbac;
 pub mod schema;
 pub mod slug;

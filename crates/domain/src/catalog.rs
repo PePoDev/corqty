@@ -306,6 +306,6 @@ pub fn validate_config(
 }
 
 /// Not blank and at most `max` characters, so the value always fits its database column.
-fn fits(value: &str, max: usize) -> bool {
+pub(crate) fn fits(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.chars().count() <= max
 }
