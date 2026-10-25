@@ -34,6 +34,11 @@ impl TestDatabase {
         .execute(&owner)
         .await
         .expect("reset test data");
+        // The truncate removed the system catalog that the migration seeded.
+        sqlx::query("SELECT corqty.seed_system_catalog()")
+            .execute(&owner)
+            .await
+            .expect("seed system catalog");
 
         let api = PgPoolOptions::new()
             // A single API connection makes the context-leak test prove that

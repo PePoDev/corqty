@@ -2,8 +2,12 @@ use corqty_test_support::TestDatabase;
 use serial_test::serial;
 
 /// Rows that `TestDatabase::reset()` puts back after truncating a table.
-fn seeded_rows(_table: &str) -> i64 {
-    0
+fn seeded_rows(table: &str) -> i64 {
+    match table {
+        "node_definitions" => 6,
+        "blueprints" => 2,
+        _ => 0,
+    }
 }
 
 #[tokio::test]
