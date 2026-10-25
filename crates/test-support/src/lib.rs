@@ -18,17 +18,19 @@ impl TestDatabase {
             .expect("connect owner test database");
         MIGRATOR.run(&owner).await.expect("run test migrations");
 
-        sqlx::query(
-            "TRUNCATE TABLE
-                audit_events,
-                invitations,
-                memberships,
-                organizations,
-                sessions,
-                password_credentials,
-                users
-             RESTART IDENTITY CASCADE",
+        // Every table the migrations created, so a new table needs no change here.
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT format('%I.%I', schemaname, tablename)
+             FROM pg_tables
+             WHERE schemaname = 'public' AND tablename <> '_sqlx_migrations'",
         )
+        .fetch_all(&owner)
+        .await
+        .expect("list test tables");
+        sqlx::query(&format!(
+            "TRUNCATE TABLE {} RESTART IDENTITY CASCADE",
+            tables.join(", ")
+        ))
         .execute(&owner)
         .await
         .expect("reset test data");
