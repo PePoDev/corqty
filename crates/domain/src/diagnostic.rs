@@ -19,3 +19,9 @@ impl Diagnostic {
         }
     }
 }
+
+/// One RFC 6901 reference token: `~` becomes `~0` and `/` becomes `~1`.
+#[must_use]
+pub fn pointer_token(token: &str) -> String {
+    token.replace('~', "~0").replace('/', "~1")
+}
