@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { isRecord } from "@/studio/graph-model"
 
 // Mirrors corqty_domain::catalog::FILE_TEXT_MAX_BYTES.
 export const FILE_TEXT_MAX_BYTES = 262_144
@@ -26,10 +27,6 @@ export type WidgetProps = {
   schema: JsonSchema
   value: unknown
   onChange: (value: unknown) => void
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function stringEnum(schema: unknown): string[] | undefined {

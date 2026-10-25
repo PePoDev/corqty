@@ -157,6 +157,7 @@ function Editor({
     setNotice("")
     const saved = await autosave.flush()
     if (saved) await task(saved)
+    else setNotice("Save the draft first: the last save failed.")
     setBusy(false)
   }
 
@@ -193,7 +194,7 @@ function Editor({
           <StatusBadge status={autosave.status} />
         )}
         {autosave.status === "error" && (
-          <span className="text-destructive">
+          <span role="alert" className="text-destructive">
             The draft could not be saved ({autosave.errorCode}). The next edit
             tries again.
           </span>
@@ -295,8 +296,17 @@ export function Studio({
   // Reloading after a conflict starts the editor over from the latest draft.
   const [generation, setGeneration] = useState(0)
 
-  // A failed background refetch keeps the loaded studio on screen.
-  if (!workflow.data || !definitions.data || !blueprints.data) {
+  // The editor starts from a draft fetched on this visit, not from the cache:
+  // the draft may have been saved since. Once it has started, a failed
+  // background refetch keeps it on screen.
+  // ponytail: a save from the last visit that lands after this fetch makes the
+  // next edit a conflict, which Reload resolves.
+  if (
+    !workflow.isFetchedAfterMount ||
+    !workflow.data ||
+    !definitions.data ||
+    !blueprints.data
+  ) {
     return workflow.isError || definitions.isError || blueprints.isError ? (
       <p role="alert" className="p-4 text-sm text-destructive md:p-6">
         The workflow could not be loaded.

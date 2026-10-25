@@ -305,7 +305,7 @@ export function Inspector({
   return (
     <aside
       aria-label="Inspector"
-      className="overflow-y-auto border-t p-4 lg:border-t-0 lg:border-l"
+      className="overflow-y-auto border-t p-4 xl:border-t-0 xl:border-l"
     >
       {/* A disabled fieldset disables every control inside it. */}
       <fieldset disabled={readOnly} className="grid gap-5">

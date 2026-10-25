@@ -1,8 +1,11 @@
-import { act, renderHook } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, cleanup, renderHook } from "@testing-library/react"
 import { http, HttpResponse } from "msw/http"
+import { createElement, type ReactNode } from "react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-import type { GraphSnapshot } from "@/api/types"
+import { queryKeys } from "@/api/queries"
+import type { GraphSnapshot, Workflow } from "@/api/types"
 import {
   AUTOSAVE_DELAY_MS,
   useDraftAutosave,
@@ -13,6 +16,9 @@ import { server } from "@/test/server"
 type Save = { revision: number; graph: GraphSnapshot }
 
 const { draft } = workflow // revision 3
+const workflowKey = queryKeys.workflow("org-1", "wf-2")
+// The studio's query cache, holding the workflow as it was loaded.
+let queryClient: QueryClient
 
 function named(displayName: string): GraphSnapshot {
   const [first, ...rest] = draft.graph.nodes
@@ -42,8 +48,14 @@ function problem(status: number, code: string) {
 
 // The canvas reports its graph once on mount: that is the loaded draft.
 function renderAutosave(readOnly = false) {
-  const { result } = renderHook(() =>
-    useDraftAutosave("org-1", "wf-2", draft, readOnly),
+  queryClient = new QueryClient()
+  queryClient.setQueryData(workflowKey, workflow)
+  const { result } = renderHook(
+    () => useDraftAutosave("org-1", "wf-2", draft, readOnly),
+    {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children),
+    },
   )
   act(() => result.current.edit(draft.graph))
   return result
@@ -59,6 +71,12 @@ async function wait(ms: number) {
 // (Testing Library's waitFor needs a real setTimeout.)
 async function settle(autosave: Autosave) {
   await act(() => autosave.current.flush())
+}
+
+// True while the page asks the browser to confirm leaving: an edit waits for
+// its timer, or a save is in flight.
+function unloadBlocked() {
+  return !window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
 }
 
 beforeEach(() => {
@@ -144,7 +162,8 @@ it.each([
   const autosave = renderAutosave()
   act(() => autosave.current.edit(named("A")))
   await wait(AUTOSAVE_DELAY_MS)
-  await settle(autosave)
+  // A flush would retry the save, so this only waits for it to fail.
+  await act(() => vi.waitUntil(() => !unloadBlocked()))
   expect(autosave.current.status).toBe("error")
   expect(autosave.current.errorCode).toBe(code)
   await wait(AUTOSAVE_DELAY_MS * 2)
@@ -182,4 +201,72 @@ it("read-only mode never saves", async () => {
   expect(autosave.current.status).toBe("saved")
   expect(await act(() => autosave.current.flush())).toEqual(draft)
   expect(saves).toEqual([])
+})
+
+it("flush also waits for a save chained behind the one in flight", async () => {
+  const answers: (() => void)[] = []
+  const saves = recordSaves(async ({ revision }) => {
+    await new Promise<void>((resolve) => answers.push(resolve))
+    return HttpResponse.json({ revision: revision + 1 })
+  })
+  const autosave = renderAutosave()
+  act(() => autosave.current.edit(named("A")))
+  await wait(AUTOSAVE_DELAY_MS)
+  await vi.waitUntil(() => saves.length === 1)
+
+  // Publish flushes while A saves, and an edit meanwhile chains B behind A.
+  const flushed = autosave.current.flush()
+  act(() => autosave.current.edit(named("B")))
+  await wait(AUTOSAVE_DELAY_MS)
+  const result = await act(async () => {
+    answers[0]()
+    await vi.waitUntil(() => saves.length === 2)
+    answers[1]()
+    return flushed
+  })
+  expect(result).toEqual({ revision: 5, graph: named("B") })
+})
+
+it("each save updates the cached workflow, including the save on leaving", async () => {
+  const autosave = renderAutosave()
+  const cached = () => queryClient.getQueryData<Workflow>(workflowKey)
+  act(() => autosave.current.edit(named("A")))
+  await wait(AUTOSAVE_DELAY_MS)
+  await settle(autosave)
+  expect(cached()).toEqual({
+    ...workflow,
+    draft: { revision: 4, graph: named("A") },
+  })
+
+  // Unmounting, as leaving the studio does, saves the pending edit.
+  act(() => autosave.current.edit(named("B")))
+  cleanup()
+  await vi.waitFor(() =>
+    expect(cached()).toEqual({
+      ...workflow,
+      draft: { revision: 5, graph: named("B") },
+    }),
+  )
+})
+
+it("asks before unloading while an edit waits or saves", async () => {
+  let answer = () => {}
+  const saves = recordSaves(async ({ revision }) => {
+    await new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    return HttpResponse.json({ revision: revision + 1 })
+  })
+  const autosave = renderAutosave()
+  expect(unloadBlocked()).toBe(false)
+
+  act(() => autosave.current.edit(named("A")))
+  expect(unloadBlocked()).toBe(true)
+  await wait(AUTOSAVE_DELAY_MS)
+  await vi.waitUntil(() => saves.length === 1)
+  expect(unloadBlocked()).toBe(true)
+
+  answer()
+  await settle(autosave)
+  expect(unloadBlocked()).toBe(false)
 })

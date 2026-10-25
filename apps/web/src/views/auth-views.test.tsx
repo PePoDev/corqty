@@ -35,6 +35,29 @@ it("sends an anonymous user to login and remembers the page", async () => {
   )
 })
 
+it("offers a retry instead of the login page when the session check fails", async () => {
+  server.use(
+    http.get(
+      "/api/v1/auth/me",
+      () => HttpResponse.json({ code: "internal" }, { status: 500 }),
+      { once: true },
+    ),
+  )
+  renderWithProviders(
+    <AuthGate>
+      <p>Signed in</p>
+    </AuthGate>,
+  )
+  expect(
+    await screen.findByText("We could not check your session."),
+  ).toBeInTheDocument()
+  expect(router.replace).not.toHaveBeenCalled()
+
+  await userEvent.click(screen.getByRole("button", { name: "Retry" }))
+  expect(await screen.findByText("Signed in")).toBeInTheDocument()
+  expect(router.replace).not.toHaveBeenCalled()
+})
+
 it("submits registration and returns to the remembered page", async () => {
   sessionStorage.setItem(
     "corqty.returnTo",

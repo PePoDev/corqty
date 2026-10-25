@@ -7,9 +7,16 @@ import {
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw/http"
+import type { ReactNode } from "react"
 import { expect, it } from "vitest"
 
-import type { Diagnostic, GraphSnapshot } from "@/api/types"
+import type {
+  Diagnostic,
+  GraphNode,
+  GraphSnapshot,
+  JsonSchema,
+  Workflow,
+} from "@/api/types"
 import { AuthGate } from "@/auth/auth-gate"
 import { AppShell } from "@/layout/app-shell"
 import { Studio } from "@/studio/studio"
@@ -25,16 +32,21 @@ const mockTask = nodeDefinitions[2] // corqty.mock.task
 const infrastructure = blueprints[1] // corqty.simulated-infrastructure
 const workflowUrl = "/api/v1/orgs/:organizationId/workflows/:workflowId"
 
-// Mirrors the (app) and orgs/[organizationId] layouts around the studio page.
-function renderStudio() {
-  return renderWithProviders(
+// Mirrors the (app) and orgs/[organizationId] layouts around a page.
+function page(children: ReactNode) {
+  return (
     <AuthGate>
-      <AppShell organizationId="org-1">
-        <Studio organizationId="org-1" workflowId="wf-2" />
-      </AppShell>
-    </AuthGate>,
-    { route: "/orgs/org-1/workflows/wf-2" },
+      <AppShell organizationId="org-1">{children}</AppShell>
+    </AuthGate>
   )
+}
+
+const studioPage = page(<Studio organizationId="org-1" workflowId="wf-2" />)
+
+function renderStudio() {
+  return renderWithProviders(studioPage, {
+    route: "/orgs/org-1/workflows/wf-2",
+  })
 }
 
 function withDraft(graph: GraphSnapshot) {
@@ -294,6 +306,31 @@ it("the inspector edits the selected node, or the workflow inputs when none is",
   ).toBeInTheDocument()
 })
 
+it("opens a draft whose input schema and node config are not objects", async () => {
+  // Draft saves accept any JSON in these two fields.
+  const [vpc, ...rest] = infrastructure.graph.nodes
+  withDraft({
+    ...infrastructure.graph,
+    workflowInputSchema: null as unknown as JsonSchema,
+    nodes: [{ ...vpc, config: null as unknown as GraphNode["config"] }, ...rest],
+  })
+  const { container } = renderStudio()
+  fireEvent.click(
+    await screen.findByRole("group", { name: "Create VPC (simulated)" }),
+  )
+  const inspector = screen.getByRole("complementary", { name: "Inspector" })
+  expect(await within(inspector).findByLabelText("Display name")).toHaveValue(
+    "Create VPC (simulated)",
+  )
+
+  const pane = container.querySelector<HTMLElement>(".react-flow__pane")
+  if (!pane) throw new Error("No pane")
+  fireEvent.click(pane)
+  expect(
+    await within(inspector).findByLabelText("Input schema (JSON)"),
+  ).toHaveValue(JSON.stringify({ type: "object", properties: {} }, null, 2))
+})
+
 it.each([
   {
     role: "viewer" as const,
@@ -351,6 +388,33 @@ it("saves the draft once editing pauses", async () => {
   expect(saves).toEqual([{ revision: 3, graph: renamed("Network") }])
 })
 
+it("re-entering the studio starts from the saved draft", async () => {
+  // The API keeps what the studio saves.
+  let current = workflow
+  server.use(
+    http.get(workflowUrl, () => HttpResponse.json(current)),
+    http.put(`${workflowUrl}/draft`, async ({ request }) => {
+      const { revision, graph } = (await request.json()) as Workflow["draft"]
+      current = { ...current, draft: { revision: revision + 1, graph } }
+      return HttpResponse.json({ revision: revision + 1 })
+    }),
+  )
+  const { rerender } = renderStudio()
+  await renameVpc("Network")
+  expect(
+    await screen.findByText("rev 4", {}, { timeout: 2000 }),
+  ).toBeInTheDocument()
+
+  rerender(page(<p>Workflow list</p>))
+  rerender(studioPage)
+  // The editor waits for a fresh draft instead of starting from the cache.
+  expect(screen.getByText("Loading workflow…")).toBeInTheDocument()
+  expect(
+    await screen.findByRole("group", { name: "Network" }),
+  ).toBeInTheDocument()
+  expect(screen.getByText("rev 4")).toBeInTheDocument()
+})
+
 it("a conflict stops saving until Reload loads the latest draft", async () => {
   server.use(
     http.put(`${workflowUrl}/draft`, () =>
@@ -402,6 +466,63 @@ it("Validate saves pending edits first and checks the saved graph", async () => 
     ["validate", { graph: renamed("Network") }],
   ])
   expect(screen.getByText("rev 4")).toBeInTheDocument()
+})
+
+it("Validate retries a save that failed", async () => {
+  const requests: unknown[] = []
+  let failing = true
+  server.use(
+    http.put(`${workflowUrl}/draft`, async ({ request }) => {
+      requests.push(["save", await request.json()])
+      if (!failing) return HttpResponse.json({ revision: 4 })
+      failing = false
+      return new HttpResponse(null, { status: 502 })
+    }),
+    http.post(`${workflowUrl}/validate`, async ({ request }) => {
+      requests.push(["validate", await request.json()])
+      return HttpResponse.json({ valid: true, diagnostics: [] })
+    }),
+  )
+  renderStudio()
+  await renameVpc("Network")
+  expect(
+    await screen.findByRole("alert", {}, { timeout: 2000 }),
+  ).toHaveTextContent("The draft could not be saved (unknown).")
+
+  await userEvent.click(screen.getByRole("button", { name: "Validate" }))
+  expect(await screen.findByText("No problems found.")).toBeInTheDocument()
+  expect(requests).toEqual([
+    ["save", { revision: 3, graph: renamed("Network") }],
+    ["save", { revision: 3, graph: renamed("Network") }],
+    ["validate", { graph: renamed("Network") }],
+  ])
+  expect(screen.getByText("Saved")).toBeInTheDocument()
+  expect(screen.getByText("rev 4")).toBeInTheDocument()
+})
+
+it("Validate says so when the draft still cannot be saved", async () => {
+  const requests: string[] = []
+  server.use(
+    http.put(`${workflowUrl}/draft`, () => {
+      requests.push("save")
+      return problem(413, "payload_too_large")
+    }),
+    http.post(`${workflowUrl}/validate`, () => {
+      requests.push("validate")
+      return HttpResponse.json({ valid: true, diagnostics: [] })
+    }),
+  )
+  renderStudio()
+  await renameVpc("Network")
+  expect(
+    await screen.findByRole("alert", {}, { timeout: 2000 }),
+  ).toHaveTextContent("The draft could not be saved (payload_too_large).")
+
+  await userEvent.click(screen.getByRole("button", { name: "Validate" }))
+  expect(
+    await screen.findByText("Save the draft first: the last save failed."),
+  ).toBeInTheDocument()
+  expect(requests).toEqual(["save", "save"])
 })
 
 it("publishing an invalid draft lists the problems and marks the node and port", async () => {

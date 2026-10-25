@@ -14,6 +14,8 @@ import type { Me } from "@/api/types"
 interface AuthValue {
   me: Me | null
   loading: boolean
+  // The last session check failed for a reason other than 401.
+  error: boolean
   refresh: () => Promise<void>
 }
 
@@ -22,11 +24,15 @@ const AuthContext = createContext<AuthValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const refresh = useCallback(async () => {
     try {
       setMe(await api<Me>("/auth/me"))
+      setError(false)
     } catch (problem) {
-      if (problem instanceof ApiProblem && problem.status === 401) setMe(null)
+      const signedOut = problem instanceof ApiProblem && problem.status === 401
+      if (signedOut) setMe(null)
+      setError(!signedOut)
     } finally {
       setLoading(false)
     }
@@ -34,7 +40,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh()
   }, [refresh])
-  const value = useMemo(() => ({ me, loading, refresh }), [me, loading, refresh])
+  const value = useMemo(
+    () => ({ me, loading, error, refresh }),
+    [me, loading, error, refresh],
+  )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

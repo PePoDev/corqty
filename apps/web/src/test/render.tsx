@@ -9,14 +9,17 @@ import { AuthProvider } from "@/auth/auth-context"
 // usePathname reads window.location.
 export const router = { push: vi.fn(), replace: vi.fn() }
 
+// The providers wrap every rerender, so the query cache outlives a page.
 export function renderWithProviders(ui: ReactElement, { route = "/" } = {}) {
   window.history.replaceState(null, "", route)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>{ui}</AuthProvider>
-    </QueryClientProvider>,
-  )
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>{children}</AuthProvider>
+      </QueryClientProvider>
+    ),
+  })
 }

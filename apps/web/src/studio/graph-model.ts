@@ -32,6 +32,10 @@ export function isSimulated(key: string) {
   return key.startsWith("corqty.simulated")
 }
 
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 function portName(handle: string | null | undefined) {
   return handle?.split(":")[1] ?? ""
 }
@@ -55,6 +59,20 @@ export function toFlowNode(
     position: node.position,
     ariaLabel: node.displayName,
     data: { node, definition: findDefinition(definitions, node.definition) },
+  }
+}
+
+// Draft saves accept any JSON as the input schema and as node config (D13);
+// the studio edits them as objects.
+export function normalizeGraph(graph: GraphSnapshot): GraphSnapshot {
+  return {
+    ...graph,
+    workflowInputSchema: isRecord(graph.workflowInputSchema)
+      ? graph.workflowInputSchema
+      : { type: "object", properties: {} },
+    nodes: graph.nodes.map((node) =>
+      isRecord(node.config) ? node : { ...node, config: {} },
+    ),
   }
 }
 

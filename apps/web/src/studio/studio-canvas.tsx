@@ -30,6 +30,7 @@ import {
   fromFlow,
   insertBlueprint,
   newNodeFromDefinition,
+  normalizeGraph,
   refusalMessage,
   toFlow,
   toFlowNode,
@@ -57,9 +58,9 @@ function Canvas({
   problems,
   onChange,
 }: CanvasProps) {
-  const [initial] = useState(() => toFlow(graph, definitions))
   // XYFlow holds the nodes and edges; this holds the rest of the snapshot.
-  const [snapshot, setSnapshot] = useState(graph)
+  const [snapshot, setSnapshot] = useState(() => normalizeGraph(graph))
+  const [initial] = useState(() => toFlow(snapshot, definitions))
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)
   const [announcement, setAnnouncement] = useState("")
@@ -147,7 +148,7 @@ function Canvas({
   }
 
   return (
-    <div className="grid min-h-0 lg:grid-cols-[1fr_20rem]">
+    <div className="grid min-h-0 xl:grid-cols-[1fr_20rem]">
       <div className="flex min-h-96 flex-col">
         <div className="min-h-0 flex-1">
           <DiagnosticsContext value={problems}>
