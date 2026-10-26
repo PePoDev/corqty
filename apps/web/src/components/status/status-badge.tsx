@@ -36,6 +36,13 @@ const statuses = {
     className: "border-red-600/40 text-red-700 dark:text-red-400",
   },
   canceled: { label: "Canceled", className: "text-muted-foreground" },
+  // The other node-run states (NodeRunState).
+  blocked: { label: "Blocked", className: "text-muted-foreground" },
+  retry_wait: {
+    label: "Retrying",
+    className: "border-amber-600/40 text-amber-700 dark:text-amber-400",
+  },
+  skipped: { label: "Skipped", className: "text-muted-foreground" },
 }
 
 export type Status = keyof typeof statuses

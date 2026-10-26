@@ -43,6 +43,10 @@ export const queryKeys = {
     ] as const,
   runs: (organizationId: string, workflowId: string) =>
     ["orgs", organizationId, "workflows", workflowId, "runs"] as const,
+  run: (organizationId: string, runId: string) =>
+    ["orgs", organizationId, "runs", runId] as const,
+  runEvents: (organizationId: string, runId: string) =>
+    ["orgs", organizationId, "runs", runId, "events"] as const,
   nodeDefinitions: (organizationId: string) =>
     ["orgs", organizationId, "node-definitions"] as const,
   blueprints: (organizationId: string) =>
@@ -223,5 +227,39 @@ export function useStartRun(organizationId: string, workflowId: string) {
         method: "POST",
         body: JSON.stringify(body),
       }),
+  )
+}
+
+// The run stream also writes this run (runs/use-run-events.ts). A refetch
+// never moves it back behind events already applied.
+export function useRun(organizationId: string, runId: string) {
+  return useQuery({
+    queryKey: queryKeys.run(organizationId, runId),
+    queryFn: async ({ signal, client, queryKey }) => {
+      const fresh = await api<Run>(`/orgs/${organizationId}/runs/${runId}`, {
+        signal,
+      })
+      const cached = client.getQueryData<Run>(queryKey)
+      return cached && cached.lastEventSeq > fresh.lastEventSeq ? cached : fresh
+    },
+  })
+}
+
+// The refresh that follows brings the run's cancelRequested flag.
+export function useCancelRun(organizationId: string) {
+  return useOrganizationMutation(organizationId, (runId: string) =>
+    api<RunSummary>(`/orgs/${organizationId}/runs/${runId}/cancel`, {
+      method: "POST",
+    }),
+  )
+}
+
+// A rerun starts the source run's version with its input.
+export function useRerunRun(organizationId: string) {
+  return useOrganizationMutation(organizationId, (runId: string) =>
+    api<Run>(`/orgs/${organizationId}/runs/${runId}/rerun`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   )
 }

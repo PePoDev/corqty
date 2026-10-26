@@ -4,7 +4,7 @@ import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 import Link from "next/link"
 import { useId, useState } from "react"
 
-import { useRuns } from "@/api/queries"
+import { useRun, useRuns } from "@/api/queries"
 import { StatusBadge } from "@/components/status/status-badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,9 +16,13 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { LogView } from "@/runs/log-view"
+import { useRunEventLog, useRunEvents } from "@/runs/use-run-events"
 
 // The studio's bottom drawer. The closed panel is only hidden, so it keeps its
 // tab and scroll position; it is not a Sheet, which would cover the canvas.
+// An inactive tab's panel unmounts, so the Logs tab streams only while the
+// drawer is open on it.
 export function RunsDrawer({
   organizationId,
   workflowId,
@@ -45,11 +49,19 @@ export function RunsDrawer({
         <Tabs defaultValue="runs">
           <TabsList>
             <TabsTrigger value="runs">Recent runs</TabsTrigger>
+            <TabsTrigger value="logs">Logs</TabsTrigger>
           </TabsList>
           <TabsContent value="runs">
             <RecentRuns
               organizationId={organizationId}
               workflowId={workflowId}
+            />
+          </TabsContent>
+          <TabsContent value="logs">
+            <NewestRunLogs
+              organizationId={organizationId}
+              workflowId={workflowId}
+              streaming={open}
             />
           </TabsContent>
         </Tabs>
@@ -110,4 +122,51 @@ function RecentRuns({
       </TableBody>
     </Table>
   )
+}
+
+// The log of the workflow's newest run, every node's lines.
+function NewestRunLogs({
+  organizationId,
+  workflowId,
+  streaming,
+}: {
+  organizationId: string
+  workflowId: string
+  streaming: boolean
+}) {
+  const runs = useRuns(organizationId, workflowId)
+  const newest = runs.data?.items[0]
+  if (!newest) {
+    return (
+      <p className="text-muted-foreground">
+        {runs.isPending
+          ? "Loading runs…"
+          : runs.isError
+            ? "The runs could not be loaded."
+            : "No runs yet."}
+      </p>
+    )
+  }
+  return (
+    <RunLogs
+      organizationId={organizationId}
+      runId={newest.id}
+      streaming={streaming}
+    />
+  )
+}
+
+function RunLogs({
+  organizationId,
+  runId,
+  streaming,
+}: {
+  organizationId: string
+  runId: string
+  streaming: boolean
+}) {
+  const run = useRun(organizationId, runId)
+  useRunEvents(organizationId, runId, streaming && run.isSuccess)
+  const events = useRunEventLog(organizationId, runId)
+  return <LogView events={events.data?.events ?? []} nodeId={null} />
 }

@@ -202,3 +202,25 @@ export type Run = RunSummary & {
   graph: GraphSnapshot
   nodes: NodeRun[]
 }
+
+// Event payloads omit absent keys: a node.state carries `error` when the node
+// failed or waits to retry, and `output` when it succeeded.
+export type RunEvent =
+  | { seq: number; type: "run.state"; state: RunStatus }
+  | {
+      seq: number
+      type: "node.state"
+      nodeId: string
+      state: NodeRunState
+      attempt: number
+      error?: NonNullable<NodeRun["error"]>
+      output?: Record<string, unknown>
+    }
+  | {
+      seq: number
+      type: "node.log"
+      nodeId: string
+      stream: "stdout" | "stderr" | "system"
+      text: string
+    }
+  | { seq: number; type: "node.log_truncated"; nodeId: string }

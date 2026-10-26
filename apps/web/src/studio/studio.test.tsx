@@ -7,14 +7,16 @@ import {
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw/http"
+import { sse } from "msw/sse"
 import type { ReactNode } from "react"
-import { expect, it } from "vitest"
+import { expect, it, vi } from "vitest"
 
 import type {
   Diagnostic,
   GraphNode,
   GraphSnapshot,
   JsonSchema,
+  RunEvent,
   Workflow,
 } from "@/api/types"
 import { AuthGate } from "@/auth/auth-gate"
@@ -778,4 +780,39 @@ it("the read-only studio on a narrow screen still lists the recent runs", async 
     "/orgs/org-1/runs/run-2",
     "/orgs/org-1/runs/run-1",
   ])
+})
+
+it("the Logs tab streams the newest run's log while the drawer is open", async () => {
+  const streamed: string[] = []
+  server.use(
+    sse<{ message: RunEvent }>(
+      "/api/v1/orgs/:organizationId/runs/:runId/events",
+      ({ client, params }) => {
+        streamed.push(String(params.runId))
+        client.send({
+          id: "4",
+          data: {
+            seq: 4,
+            type: "node.log",
+            nodeId: "vpc",
+            stream: "stdout",
+            text: "creating the VPC",
+          },
+        })
+      },
+    ),
+  )
+  const close = vi.spyOn(EventSource.prototype, "close")
+  renderStudio()
+  const toggle = await screen.findByRole("button", { name: "Runs" })
+  await userEvent.click(toggle)
+  await userEvent.click(screen.getByRole("tab", { name: "Logs" }))
+  const log = await screen.findByRole("log", { name: "Logs" })
+  expect(await within(log).findByText("creating the VPC")).toBeInTheDocument()
+  expect(streamed).toEqual(["run-2"])
+  expect(close).not.toHaveBeenCalled()
+
+  await userEvent.click(toggle)
+  expect(close).toHaveBeenCalledTimes(1)
+  close.mockRestore()
 })

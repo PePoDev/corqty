@@ -10,8 +10,10 @@ import type {
   Me,
   Member,
   NodeDefinition,
+  NodeRun,
   PortSpec,
   Role,
+  Run,
   RunSummary,
   Workflow,
   WorkflowSummary,
@@ -363,6 +365,42 @@ export const runs: RunSummary[] = [
   },
 ]
 
+function nodeRun(nodeId: string, changes: Partial<NodeRun> = {}): NodeRun {
+  return {
+    nodeId,
+    state: "blocked",
+    attempt: 0,
+    maxAttempts: 1,
+    executor: "mock@1.0.0",
+    queueReason: null,
+    input: null,
+    output: null,
+    error: null,
+    startedAt: null,
+    finishedAt: null,
+    ...changes,
+  }
+}
+
+// run-2 in detail, after its events 1-3: queued, VPC running, run running.
+export const run: Run = {
+  ...runs[0],
+  workflowName: "Provision staging",
+  input: { region: "eu-west-1" },
+  lastEventSeq: 3,
+  graph: workflowVersion.graph,
+  nodes: [
+    nodeRun("vpc", {
+      state: "running",
+      attempt: 1,
+      input: { region: "eu-west-1" },
+      startedAt: "2026-10-26T09:00:01Z",
+    }),
+    nodeRun("rds"),
+    nodeRun("deploy"),
+  ],
+}
+
 // A signed-in admin of org-1 who reads data and saves drafts; tests override
 // other writes and failures.
 export const handlers = [
@@ -392,6 +430,9 @@ export const handlers = [
   ),
   http.get("/api/v1/orgs/:organizationId/workflows/:workflowId/runs", () =>
     HttpResponse.json({ items: runs }),
+  ),
+  http.get("/api/v1/orgs/:organizationId/runs/:runId", () =>
+    HttpResponse.json(run),
   ),
   http.get("/api/v1/orgs/:organizationId/node-definitions", () =>
     HttpResponse.json({ items: nodeDefinitions }),
