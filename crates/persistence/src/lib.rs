@@ -10,4 +10,5 @@ pub mod organizations;
 pub mod runs;
 pub mod store;
 pub mod tenant;
+pub mod worker_queue;
 pub mod workflows;
