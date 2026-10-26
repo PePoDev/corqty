@@ -27,7 +27,8 @@ services:
     build:
       context: .
       dockerfile: docker/rust/Dockerfile
-    command: ["cargo", "run", "--locked", "-p", "corqty-migrator"]
+      target: migrate
+    init: true
     environment:
       DATABASE_URL_OWNER: ${DATABASE_URL_OWNER:-postgres://corqty_owner:corqty_owner_dev@postgres:5432/corqty}
     depends_on:
@@ -39,6 +40,8 @@ services:
     build:
       context: .
       dockerfile: docker/rust/Dockerfile
+      target: api
+    init: true
     environment:
       DATABASE_URL_API: ${DATABASE_URL_API:-postgres://corqty_api:corqty_api_dev@postgres:5432/corqty}
       CORQTY_BIND_ADDRESS: 0.0.0.0:8080

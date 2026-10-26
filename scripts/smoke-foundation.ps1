@@ -312,3 +312,11 @@ foreach ($service in $required) {
         throw "Unhealthy service: $service"
     }
 }
+
+foreach ($service in @("migrate", "api")) {
+    $container = docker compose --project-name $ProjectName ps --all --quiet $service
+    $user = docker inspect --format "{{.Config.User}}" $container
+    if ($user -ne "10001:10001") {
+        throw "The $service container runs as user '$user', not 10001:10001"
+    }
+}
