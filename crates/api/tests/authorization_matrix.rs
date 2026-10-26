@@ -303,6 +303,24 @@ async fn run_routes_enforce_capabilities() {
 
 #[tokio::test]
 #[serial]
+async fn settings_routes_enforce_capabilities() {
+    let matrix = Matrix::new().await;
+    let settings = format!("/api/v1/orgs/{}/settings", matrix.organization_id);
+    matrix
+        .assert_row(Method::GET, &settings, "", Capability::ViewOrganization)
+        .await;
+    matrix
+        .assert_row(
+            Method::PUT,
+            &format!("{settings}/shell"),
+            r#"{"enabled":true}"#,
+            Capability::EnableShellExecutor,
+        )
+        .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn org_access_commit_reports_the_deferred_final_admin_check_as_conflict() {
     let database = TestDatabase::reset().await;
     let user_id = Uuid::new_v4();

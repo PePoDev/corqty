@@ -1,6 +1,7 @@
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use corqty_domain::{
     diagnostic::Diagnostic,
+    publish::shell_diagnostics,
     rbac::Capability,
     run::plan_run,
     runtime::MAX_RUN_INPUT_BYTES,
@@ -9,6 +10,7 @@ use corqty_domain::{
 use corqty_persistence::{
     catalog,
     models::SessionRecord,
+    organizations,
     runs::{self, CancelError, NewRun, RunRecord, RunSummaryRecord},
     workflows,
 };
@@ -155,7 +157,8 @@ pub async fn cancel_run(
 }
 
 /// Creates a run of the workflow's `version` from its plan and reads it back. `input` must
-/// match that version's workflow input schema.
+/// match that version's workflow input schema, and a version with shell nodes runs only while
+/// the organization has the shell executor enabled.
 async fn create(
     access: &mut OrgAccess,
     workflow_id: Uuid,
@@ -179,6 +182,17 @@ async fn create(
         });
     }
     let definitions = catalog::definitions_map(&mut access.tx).await?;
+    // ponytail: no row lock, so a run that starts while an admin disables shell counts as
+    // started just before; disabling never touches existing runs anyway.
+    if !organizations::shell_enabled(&mut access.tx, access.organization_id).await? {
+        let diagnostics = shell_diagnostics(&version.graph, &definitions);
+        if !diagnostics.is_empty() {
+            return Err(ApiError::Invalid {
+                code: "executor_disabled",
+                diagnostics,
+            });
+        }
+    }
     let nodes = plan_run(&version.graph, &definitions)
         .ok_or_else(|| ApiError::internal("a published version has no run plan"))?;
     let run = runs::create_run(

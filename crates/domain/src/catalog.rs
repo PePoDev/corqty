@@ -23,8 +23,8 @@ pub const WIDGETS: [&str; 10] = [
     "keyValue",
     "fileText",
 ];
-// ponytail: a static compiled registry; Milestone 3 adds executors that workers advertise.
-pub const BUILTIN_EXECUTORS: &[(&str, &str)] = &[("mock", "1.0.0")];
+// ponytail: the executors compiled into every worker; Milestone 4 adds installed plugins.
+pub const BUILTIN_EXECUTORS: &[(&str, &str)] = &[("mock", "1.0.0"), ("shell", "1.0.0")];
 pub const FILE_TEXT_MAX_BYTES: usize = 262_144;
 /// The most input ports, and the most output ports, one definition can have.
 pub const MAX_PORTS: usize = 50;
@@ -258,7 +258,7 @@ pub fn validate_spec(spec: &NodeDefinitionSpec) -> Vec<Diagnostic> {
         diagnostics.push(Diagnostic::new(
             "unknown_executor",
             "/executor",
-            "The executor must be mock 1.0.0.",
+            "The executor must be mock 1.0.0 or shell 1.0.0.",
         ));
     }
     diagnostics

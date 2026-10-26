@@ -36,6 +36,14 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/orgs/{organization_id}/audit-events", get(audit::list))
         .route(
+            "/orgs/{organization_id}/settings",
+            get(organizations::settings::get_settings),
+        )
+        .route(
+            "/orgs/{organization_id}/settings/shell",
+            put(organizations::settings::set_shell),
+        )
+        .route(
             "/orgs/{organization_id}/members/{target_user_id}",
             axum::routing::patch(organizations::members::change_role)
                 .delete(organizations::members::remove_member),

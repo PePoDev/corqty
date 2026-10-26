@@ -189,10 +189,10 @@ $blueprints = Invoke-SmokeRequest `
     -Method Get `
     -Path "$organizationPath/blueprints"
 if (
-    @($definitions.Body.items | Where-Object { $_.scope -eq "system" }).Count -ne 6 -or
+    @($definitions.Body.items | Where-Object { $_.scope -eq "system" }).Count -ne 7 -or
     @($blueprints.Body.items | Where-Object { $_.scope -eq "system" }).Count -ne 2
 ) {
-    throw "System catalog does not list 6 node definitions and 2 blueprints"
+    throw "System catalog does not list 7 node definitions and 2 blueprints"
 }
 
 $workflows = @{}

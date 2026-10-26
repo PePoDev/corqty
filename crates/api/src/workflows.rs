@@ -2,14 +2,16 @@ use std::collections::HashMap;
 
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use corqty_domain::{
+    diagnostic::Diagnostic,
     graph::{GraphSnapshot, check_limits},
-    publish::{canonical_checksum, validate_graph},
+    publish::{Definitions, canonical_checksum, shell_diagnostics, validate_graph},
     rbac::Capability,
     slug::slugify,
 };
 use corqty_persistence::{
     catalog,
     models::SessionRecord,
+    organizations,
     workflows::{self, VersionRecord, VersionSummaryRecord, WorkflowRecord, WorkflowSummaryRecord},
 };
 use serde::Deserialize;
@@ -162,7 +164,7 @@ pub async fn save_draft(
     Ok(Json(json!({ "revision": revision })))
 }
 
-/// Checks a graph as a publish would, without storing anything.
+/// Checks a graph as a publish would, shell nodes included, without storing anything.
 pub async fn validate(
     State(state): State<AppState>,
     Extension(session): Extension<SessionRecord>,
@@ -179,9 +181,12 @@ pub async fn validate(
     if !workflows::workflow_exists(&mut access.tx, workflow_id).await? {
         return Err(ApiError::NotFound);
     }
+    let shell_enabled = organizations::shell_enabled(&mut access.tx, organization_id).await?;
     let definitions = catalog::definitions_map(&mut access.tx).await?;
-    let (_, diagnostics) =
-        blocking(body.graph, move |graph| validate_graph(graph, &definitions)).await?;
+    let (_, diagnostics) = blocking(body.graph, move |graph| {
+        publish_diagnostics(graph, &definitions, shell_enabled)
+    })
+    .await?;
     access.commit().await?;
     Ok(Json(json!({
         "valid": diagnostics.is_empty(),
@@ -234,9 +239,10 @@ pub async fn publish(
     if workflows::version_exists_for_revision(&mut access.tx, workflow_id, draft.revision).await? {
         return Err(ApiError::Conflict("draft_already_published"));
     }
+    let shell_enabled = organizations::shell_enabled(&mut access.tx, organization_id).await?;
     let definitions = catalog::definitions_map(&mut access.tx).await?;
     let (graph, diagnostics) = blocking(draft.graph, move |graph| {
-        validate_graph(graph, &definitions)
+        publish_diagnostics(graph, &definitions, shell_enabled)
     })
     .await?;
     if !diagnostics.is_empty() {
@@ -277,6 +283,20 @@ pub async fn get_version(
         .ok_or(ApiError::NotFound)?;
     access.commit().await?;
     Ok(Json(record))
+}
+
+/// Every reason the organization cannot publish `graph`: the publish rules, then each shell
+/// node while the organization has not enabled the shell executor.
+fn publish_diagnostics(
+    graph: &GraphSnapshot,
+    definitions: &Definitions,
+    shell_enabled: bool,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = validate_graph(graph, definitions);
+    if !shell_enabled {
+        diagnostics.extend(shell_diagnostics(graph, definitions));
+    }
+    diagnostics
 }
 
 /// The unique key that keeps a draft revision from becoming two versions. The workflow
