@@ -7,6 +7,7 @@ import { useRun } from "@/api/queries"
 import type { RunEvent } from "@/api/types"
 import {
   EVENT_LIMIT,
+  canStream,
   mergeEvents,
   useRunEventLog,
   useRunEvents,
@@ -37,11 +38,12 @@ const succeeded: RunEvent = { seq: 9, type: "run.state", state: "succeeded" }
 
 function RunProbe() {
   const query = useRun("org-1", "run-2")
-  useRunEvents("org-1", "run-2", query.isSuccess)
+  useRunEvents("org-1", "run-2", canStream(query))
   const events = useRunEventLog("org-1", "run-2")
   return (
     <>
       <p>Run {query.data?.status}</p>
+      {query.data?.cancelRequested && <p>Cancel requested</p>}
       <ul aria-label="Nodes">
         {query.data?.nodes.map((node) => (
           <li key={node.nodeId}>
@@ -128,9 +130,10 @@ it("reconnects with ?after= once the browser gives up", async () => {
     }),
     http.get(eventsUrl, () => {
       connections += 1
-      // The browser's own retry fails for good (CLOSED).
+      // The browser's own retry fails for good (CLOSED), here because the
+      // API already holds as many streams as it allows.
       if (connections === 2) {
-        return HttpResponse.json({ code: "unavailable" }, { status: 503 })
+        return HttpResponse.json({ code: "too_many_streams" }, { status: 429 })
       }
     }),
     sse<{ message: RunEvent }>(eventsUrl, ({ client, request }) => {
@@ -152,8 +155,27 @@ it("reconnects with ?after= once the browser gives up", async () => {
   })
   expect(afters).toEqual(["0", "5"])
   expect(shownSeqs()).toEqual(["4", "5", "9"])
-  // The run is read again before the new connection.
-  expect(runReads).toBe(2)
+  // The run is read again before the new connection, and once it ends.
+  await waitFor(() => expect(runReads).toBe(3))
+})
+
+it("a refetch keeps the server's fields and replays newer events onto them", async () => {
+  let cancelRequested = false
+  server.use(
+    http.get(runUrl, () => HttpResponse.json({ ...run, cancelRequested })),
+    sse<{ message: RunEvent }>(eventsUrl, ({ client }) => {
+      client.send({ id: "4", data: log(4) })
+      client.send({ id: "5", data: vpcSucceeded })
+    }),
+  )
+  renderWithProviders(<RunProbe />)
+  await waitFor(() => expect(shownSeqs()).toEqual(["4", "5"]))
+
+  // A cancel lands. The next read sees it but not events 4 and 5 yet.
+  cancelRequested = true
+  window.dispatchEvent(new Event("visibilitychange"))
+  expect(await screen.findByText("Cancel requested")).toBeInTheDocument()
+  expect(screen.getByText("vpc succeeded")).toBeInTheDocument()
 })
 
 it("closes the stream on the terminal run state", async () => {

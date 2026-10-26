@@ -451,7 +451,7 @@ export const handlers = [
     HttpResponse.json({ items: auditEvents }),
   ),
   http.get("/api/v1/orgs/:organizationId/settings", () =>
-    HttpResponse.json({ shellEnabled: false }),
+    HttpResponse.json({ shellAvailable: true, shellEnabled: false }),
   ),
   http.get("/api/v1/orgs/:organizationId/workflows", () =>
     HttpResponse.json({ items: workflows }),

@@ -52,7 +52,13 @@ export function SettingsView({ organizationId }: { organizationId: string }) {
             The settings could not be loaded.
           </p>
         )}
-        {settings.data &&
+        {settings.data && !settings.data.shellAvailable && (
+          <p className="text-sm">
+            The shell executor is turned off for this deployment
+            (CORQTY_SHELL_EXECUTOR).
+          </p>
+        )}
+        {settings.data?.shellAvailable &&
           (canEnableShell ? (
             <div className="flex items-center gap-2">
               <input

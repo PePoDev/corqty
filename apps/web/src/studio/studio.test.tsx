@@ -221,12 +221,12 @@ it("the palette lists the latest definitions and blueprints and filters them", a
 })
 
 it("the palette offers the shell preset only while shell is enabled", async () => {
-  let shellEnabled = false
+  let settings = { shellAvailable: true, shellEnabled: false }
   let reads = 0
   server.use(
     http.get("/api/v1/orgs/:organizationId/settings", () => {
       reads += 1
-      return HttpResponse.json({ shellEnabled })
+      return HttpResponse.json(settings)
     }),
   )
   renderStudio()
@@ -240,9 +240,18 @@ it("the palette offers the shell preset only while shell is enabled", async () =
   ).not.toBeInTheDocument()
 
   // An admin enables shell elsewhere; coming back to the tab refetches.
-  shellEnabled = true
+  settings = { shellAvailable: true, shellEnabled: true }
   window.dispatchEvent(new Event("visibilitychange"))
   expect(await within(definitions).findByText("Shell command")).toBeVisible()
+
+  // The operator turns shell off for the whole deployment.
+  settings = { shellAvailable: false, shellEnabled: true }
+  window.dispatchEvent(new Event("visibilitychange"))
+  await waitFor(() =>
+    expect(
+      within(definitions).queryByText("Shell command"),
+    ).not.toBeInTheDocument(),
+  )
 })
 
 it("dropping a definition adds a node with a fresh id at the drop point", async () => {

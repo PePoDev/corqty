@@ -53,6 +53,8 @@ export interface AuditEvent {
 }
 
 export interface OrganizationSettings {
+  // False while the deployment keeps shell off (CORQTY_SHELL_EXECUTOR).
+  shellAvailable: boolean
   shellEnabled: boolean
 }
 
@@ -208,7 +210,8 @@ export type Run = RunSummary & {
 }
 
 // Event payloads omit absent keys: a node.state carries `error` when the node
-// failed or waits to retry, and `output` when it succeeded.
+// failed or waits to retry, `output` when it succeeded, and `input` once a
+// finished attempt resolved it.
 export type RunEvent =
   | { seq: number; type: "run.state"; state: RunStatus }
   | {
@@ -218,6 +221,7 @@ export type RunEvent =
       state: NodeRunState
       attempt: number
       error?: NonNullable<NodeRun["error"]>
+      input?: Record<string, unknown>
       output?: Record<string, unknown>
     }
   | {

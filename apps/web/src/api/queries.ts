@@ -18,6 +18,7 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "@/api/types"
+import { applyEvents, type RunEventLog } from "@/runs/use-run-events"
 
 export const queryKeys = {
   organization: (organizationId: string) => ["orgs", organizationId] as const,
@@ -254,16 +255,20 @@ export function useStartRun(organizationId: string, workflowId: string) {
 }
 
 // The run stream also writes this run (runs/use-run-events.ts). A refetch
-// never moves it back behind events already applied.
+// replays the streamed events newer than its response onto it, so it never
+// moves back behind them and still brings what no event carries, like
+// cancelRequested.
 export function useRun(organizationId: string, runId: string) {
   return useQuery({
     queryKey: queryKeys.run(organizationId, runId),
-    queryFn: async ({ signal, client, queryKey }) => {
+    queryFn: async ({ signal, client }) => {
       const fresh = await api<Run>(`/orgs/${organizationId}/runs/${runId}`, {
         signal,
       })
-      const cached = client.getQueryData<Run>(queryKey)
-      return cached && cached.lastEventSeq > fresh.lastEventSeq ? cached : fresh
+      const log = client.getQueryData<RunEventLog>(
+        queryKeys.runEvents(organizationId, runId),
+      )
+      return applyEvents(fresh, log?.events ?? [])
     },
   })
 }

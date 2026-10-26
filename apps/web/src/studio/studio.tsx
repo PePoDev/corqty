@@ -103,10 +103,11 @@ function Editor({
   const publish = usePublishWorkflow(organizationId, workflow.id)
   const settings = useSettings(organizationId)
   // The shell preset (and any definition on the shell executor) is offered
-  // only once an admin enables shell.
-  const paletteDefinitions = settings.data?.shellEnabled
-    ? definitions
-    : definitions.filter(({ executor }) => executor.key !== "shell")
+  // only while the deployment allows shell and an admin enabled it.
+  const paletteDefinitions =
+    settings.data?.shellAvailable && settings.data.shellEnabled
+      ? definitions
+      : definitions.filter(({ executor }) => executor.key !== "shell")
   const queryClient = useQueryClient()
   const [problems, setProblems] = useState<{
     graph: GraphSnapshot

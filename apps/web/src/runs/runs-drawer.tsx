@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LogView } from "@/runs/log-view"
-import { useRunEventLog, useRunEvents } from "@/runs/use-run-events"
+import { canStream, useRunEventLog, useRunEvents } from "@/runs/use-run-events"
 
 // The studio's bottom drawer. The closed panel is only hidden, so it keeps its
 // tab and scroll position; it is not a Sheet, which would cover the canvas.
@@ -166,7 +166,7 @@ function RunLogs({
   streaming: boolean
 }) {
   const run = useRun(organizationId, runId)
-  useRunEvents(organizationId, runId, streaming && run.isSuccess)
+  useRunEvents(organizationId, runId, streaming && canStream(run))
   const events = useRunEventLog(organizationId, runId)
   return <LogView events={events.data?.events ?? []} nodeId={null} />
 }

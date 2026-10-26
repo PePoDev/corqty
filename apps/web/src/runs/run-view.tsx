@@ -18,7 +18,12 @@ import { useCan } from "@/auth/use-can"
 import { StatusBadge } from "@/components/status/status-badge"
 import { Button } from "@/components/ui/button"
 import { LogView } from "@/runs/log-view"
-import { isTerminal, useRunEventLog, useRunEvents } from "@/runs/use-run-events"
+import {
+  canStream,
+  isTerminal,
+  useRunEventLog,
+  useRunEvents,
+} from "@/runs/use-run-events"
 
 // XYFlow measures the DOM, so the graph renders only in the browser.
 const RunGraph = dynamic(
@@ -34,9 +39,11 @@ const RunGraph = dynamic(
 function RunHeader({
   organizationId,
   run,
+  connection,
 }: {
   organizationId: string
   run: Run
+  connection: string
 }) {
   const canRun = useCan(organizationId, "run_workflows")
   const router = useRouter()
@@ -96,6 +103,9 @@ function RunHeader({
         <span className="text-muted-foreground">Cancel requested</span>
       )}
       <span aria-live="polite">{notice}</span>
+      <span role="status" className="text-muted-foreground">
+        {connection}
+      </span>
       {canRun && (
         <div className="ml-auto flex items-center gap-2">
           {!terminal && (
@@ -169,9 +179,10 @@ function NodeDetails({ run, nodeId }: { run: Run; nodeId: string | null }) {
           {nodeRun.attempt} of {nodeRun.maxAttempts}
         </dd>
       </dl>
-      {nodeRun.queueReason === "waiting_for_compatible_worker" && (
-        <p>Waiting for a worker that runs {nodeRun.executor}.</p>
-      )}
+      {(nodeRun.state === "queued" || nodeRun.state === "retry_wait") &&
+        nodeRun.queueReason === "waiting_for_compatible_worker" && (
+          <p>Waiting for a worker that runs {nodeRun.executor}.</p>
+        )}
       {nodeRun.error && (
         <p className="text-destructive">
           {nodeRun.error.message}{" "}
@@ -225,7 +236,8 @@ export function RunView({
 }) {
   const run = useRun(organizationId, runId)
   const definitions = useNodeDefinitions(organizationId)
-  useRunEvents(organizationId, runId, run.isSuccess)
+  const streaming = canStream(run)
+  useRunEvents(organizationId, runId, streaming)
   const events = useRunEventLog(organizationId, runId)
   const [selected, setSelected] = useState<string | null>(null)
 
@@ -239,9 +251,21 @@ export function RunView({
     )
   }
 
+  // A failed read leaves the last known run on screen; say why it may be
+  // behind.
+  const connection = !run.isError
+    ? ""
+    : streaming
+      ? "Reconnecting…"
+      : "Live updates stopped."
+
   return (
     <section>
-      <RunHeader organizationId={organizationId} run={run.data} />
+      <RunHeader
+        organizationId={organizationId}
+        run={run.data}
+        connection={connection}
+      />
       <div className="grid lg:grid-cols-[1fr_20rem]">
         <div className="h-112">
           <RunGraph

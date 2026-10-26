@@ -28,12 +28,14 @@ it("an admin turns the shell executor on and off below the trusted-user warning"
   let shellEnabled = false
   const changes: unknown[] = []
   server.use(
-    http.get(settingsUrl, () => HttpResponse.json({ shellEnabled })),
+    http.get(settingsUrl, () =>
+      HttpResponse.json({ shellAvailable: true, shellEnabled }),
+    ),
     http.put(`${settingsUrl}/shell`, async ({ request }) => {
       const change = (await request.json()) as { enabled: boolean }
       changes.push(change)
       shellEnabled = change.enabled
-      return HttpResponse.json({ shellEnabled })
+      return HttpResponse.json({ shellAvailable: true, shellEnabled })
     }),
   )
   renderSettings()
@@ -60,7 +62,9 @@ it("an admin turns the shell executor on and off below the trusted-user warning"
 it("an editor sees whether shell is enabled but cannot change it", async () => {
   server.use(
     http.get("/api/v1/auth/me", () => HttpResponse.json(meAs("editor"))),
-    http.get(settingsUrl, () => HttpResponse.json({ shellEnabled: true })),
+    http.get(settingsUrl, () =>
+      HttpResponse.json({ shellAvailable: true, shellEnabled: true }),
+    ),
   )
   renderSettings()
   expect(
@@ -68,6 +72,24 @@ it("an editor sees whether shell is enabled but cannot change it", async () => {
   ).toBeInTheDocument()
   expect(screen.getByRole("alert")).toHaveTextContent("Trusted users only")
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+})
+
+it("explains that the deployment turned the shell executor off", async () => {
+  server.use(
+    http.get(settingsUrl, () =>
+      HttpResponse.json({ shellAvailable: false, shellEnabled: true }),
+    ),
+  )
+  renderSettings()
+  expect(
+    await screen.findByText(
+      "The shell executor is turned off for this deployment (CORQTY_SHELL_EXECUTOR).",
+    ),
+  ).toBeInTheDocument()
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+  expect(
+    screen.queryByText("The shell executor is enabled."),
+  ).not.toBeInTheDocument()
 })
 
 it("says why the shell executor could not be changed", async () => {

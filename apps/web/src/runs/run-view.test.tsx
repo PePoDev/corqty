@@ -178,6 +178,87 @@ it("shows the selected node's details and only its log", async () => {
   expect(logs).not.toBeVisible()
 })
 
+it("the selected node's details follow its events", async () => {
+  withRun({
+    nodes: [
+      {
+        ...run.nodes[0],
+        state: "queued",
+        attempt: 0,
+        maxAttempts: 2,
+        queueReason: "waiting_for_compatible_worker",
+        input: null,
+        startedAt: null,
+      },
+      ...run.nodes.slice(1),
+    ],
+  })
+  const connections = stream()
+  renderRun()
+  fireEvent.click(
+    await screen.findByRole("group", { name: "Create VPC (simulated)" }),
+  )
+  const details = screen.getByRole("complementary", { name: "Node details" })
+  expect(details).toHaveTextContent(
+    "Waiting for a worker that runs mock@1.0.0.",
+  )
+  await waitFor(() => expect(connections).toHaveLength(1))
+
+  // A worker picks the node up: it no longer waits for one.
+  connections[0]({
+    seq: 4,
+    type: "node.state",
+    nodeId: "vpc",
+    state: "running",
+    attempt: 1,
+  })
+  await waitFor(() =>
+    expect(within(details).getByText("Running")).toBeInTheDocument(),
+  )
+  expect(details).not.toHaveTextContent("Waiting for a worker")
+
+  connections[0]({
+    seq: 5,
+    type: "node.state",
+    nodeId: "vpc",
+    state: "retry_wait",
+    attempt: 1,
+    error: {
+      code: "mock_retryable_failure",
+      message: "Attempt 1 fails because failAttempts is 1.",
+      retryable: true,
+    },
+  })
+  await waitFor(() => expect(details).toHaveTextContent("failAttempts is 1"))
+
+  // The retry succeeds: the first attempt's error goes, the input arrives.
+  connections[0]({
+    seq: 6,
+    type: "node.state",
+    nodeId: "vpc",
+    state: "running",
+    attempt: 2,
+  })
+  connections[0]({
+    seq: 7,
+    type: "node.state",
+    nodeId: "vpc",
+    state: "succeeded",
+    attempt: 2,
+    input: { region: "eu-west-1" },
+    output: { vpcId: "vpc-0simulated" },
+  })
+  await waitFor(() =>
+    expect(within(details).getByText("Succeeded")).toBeInTheDocument(),
+  )
+  expect(within(details).getByText("2 of 2")).toBeInTheDocument()
+  expect(details).not.toHaveTextContent("mock_retryable_failure")
+  const figure = (caption: string) =>
+    within(details).getByText(caption).closest("figure")
+  expect(figure("Input")).toHaveTextContent('{ "region": "eu-west-1" }')
+  expect(figure("Output")).toHaveTextContent('{ "vpcId": "vpc-0simulated" }')
+})
+
 it("a runner cancels the run and then reruns it", async () => {
   signedInAs("runner")
   const requests: string[] = []
@@ -226,6 +307,78 @@ it("Cancel says why it failed", async () => {
   expect(
     await screen.findByText("Cancel failed (run_finished)."),
   ).toBeInTheDocument()
+})
+
+it("keeps following the run through an outage and says it is reconnecting", async () => {
+  let down = false
+  const afters: (string | null)[] = []
+  const connections: {
+    send: (event: RunEvent) => void
+    close: () => void
+  }[] = []
+  const unavailable = () =>
+    HttpResponse.json({ code: "unavailable" }, { status: 503 })
+  server.use(
+    http.get(runUrl, () => (down ? unavailable() : HttpResponse.json(run))),
+    http.get(`${runUrl}/events`, () => (down ? unavailable() : undefined)),
+    sse<{ message: RunEvent }>(`${runUrl}/events`, ({ client, request }) => {
+      afters.push(new URL(request.url).searchParams.get("after"))
+      client.send({ retry: 10 })
+      connections.push({
+        send: (event) => client.send({ id: String(event.seq), data: event }),
+        close: () => client.close(),
+      })
+    }),
+  )
+  renderRun()
+  await waitFor(() => expect(connections).toHaveLength(1))
+  connections[0].send(log(4, "vpc"))
+  expect(await screen.findByText("line 4")).toBeInTheDocument()
+
+  // The API goes away: the browser's retry fails, and so does the run read.
+  down = true
+  connections[0].close()
+  expect(await screen.findByText("Reconnecting…")).toHaveAttribute(
+    "role",
+    "status",
+  )
+
+  // Back again: the next attempt (after 1 s) resumes after event 4, and the
+  // run is read again.
+  down = false
+  await waitFor(
+    () => expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument(),
+    { timeout: 3000 },
+  )
+  expect(afters).toEqual(["0", "4"])
+  connections[1].send({ seq: 9, type: "run.state", state: "succeeded" })
+  const status = screen.getByRole("status", { name: "Run status" })
+  await waitFor(() => expect(status).toHaveTextContent("Succeeded"))
+})
+
+it("stops following the run once a read says it is gone", async () => {
+  let connections = 0
+  let signedOut = false
+  server.use(
+    http.get(runUrl, () =>
+      signedOut
+        ? HttpResponse.json({ code: "unauthenticated" }, { status: 401 })
+        : HttpResponse.json(run),
+    ),
+    http.get(`${runUrl}/events`, () => {
+      connections += 1
+      signedOut = true
+      return HttpResponse.json({ code: "unauthenticated" }, { status: 401 })
+    }),
+  )
+  renderRun()
+  expect(await screen.findByText("Live updates stopped.")).toHaveAttribute(
+    "role",
+    "status",
+  )
+  // No new connection after the first backoff (1 s).
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  expect(connections).toBe(1)
 })
 
 it("a viewer follows the run without Cancel or Rerun", async () => {

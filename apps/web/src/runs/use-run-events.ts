@@ -3,6 +3,7 @@
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect } from "react"
 
+import { ApiProblem } from "@/api/client"
 import { queryKeys } from "@/api/queries"
 import type { Run, RunEvent, RunStatus } from "@/api/types"
 
@@ -43,7 +44,9 @@ export function mergeEvents(
 }
 
 // Events the snapshot already reflects (seq <= lastEventSeq) change nothing.
-// A node.state carries only the keys it changes.
+// A node.state carries only the keys it changes, so the rest follows the
+// server's rules: a success has no error (a canceled retry keeps its last
+// one), and a queue reason holds only while the node waits.
 export function applyEvents(run: Run, events: RunEvent[]): Run {
   const fresh = events.filter((event) => event.seq > run.lastEventSeq)
   if (fresh.length === 0) return run
@@ -57,8 +60,16 @@ export function applyEvents(run: Run, events: RunEvent[]): Run {
               ...node,
               state: event.state,
               attempt: event.attempt,
-              error: event.error ?? node.error,
+              error:
+                event.state === "succeeded"
+                  ? null
+                  : (event.error ?? node.error),
+              input: event.input ?? node.input,
               output: event.output ?? node.output,
+              queueReason:
+                event.state === "queued" || event.state === "retry_wait"
+                  ? node.queueReason
+                  : null,
             }
           : node,
       )
@@ -67,9 +78,21 @@ export function applyEvents(run: Run, events: RunEvent[]): Run {
   return { ...run, status, nodes, lastEventSeq: fresh.at(-1)!.seq }
 }
 
-// Streams a run's events into the query cache while `enabled`. Pass
-// `run.isSuccess`, so a 401 or 404 on a run refetch closes the stream. It
-// resumes after the newest event in the cache, or replays from the start.
+// Whether to stream a loaded run. A failed read (an outage) keeps the cached
+// run and the stream retrying; a 401, 403 or 404 ends it for good.
+export function canStream(run: { data?: Run; error: Error | null }) {
+  return (
+    run.data !== undefined &&
+    !(
+      run.error instanceof ApiProblem &&
+      [401, 403, 404].includes(run.error.status)
+    )
+  )
+}
+
+// Streams a run's events into the query cache while `enabled`; pass
+// `canStream(run)`. It resumes after the newest event in the cache, or
+// replays from the start.
 export function useRunEvents(
   organizationId: string,
   runId: string,
@@ -122,6 +145,10 @@ export function useRunEvents(
       source = current
       current.onopen = () => {
         failures = 0
+        // A run read that failed while the stream was down is tried again.
+        if (queryClient.getQueryState(runKey)?.status === "error") {
+          void queryClient.invalidateQueries({ queryKey: runKey, exact: true })
+        }
       }
       current.onmessage = (message) => {
         const event = JSON.parse(message.data) as RunEvent
@@ -132,14 +159,16 @@ export function useRunEvents(
         if (event.type === "run.state" && isTerminal(event.state)) {
           current.close()
           flush()
+          // The final read brings what no event carries, like finish times.
+          void queryClient.invalidateQueries({ queryKey: runKey, exact: true })
         }
       }
       current.onerror = () => {
         // CONNECTING: the browser retries by itself and sends Last-Event-ID.
         if (current.readyState !== EventSource.CLOSED) return
         // CLOSED: a non-200 (204 included) that the browser never retries.
-        // The status is hidden, so read the run first: a 401 or 404 turns
-        // `enabled` off, and a finished run ends in done().
+        // The status is hidden, so read the run first: a 401, 403 or 404
+        // turns `enabled` off, and a finished run ends in done().
         flush()
         void queryClient
           .invalidateQueries({ queryKey: runKey, exact: true })
