@@ -52,6 +52,10 @@ export interface AuditEvent {
   occurredAt: string
 }
 
+export interface OrganizationSettings {
+  shellEnabled: boolean
+}
+
 // The catalog and workflow types list only the fields the UI reads; the API
 // also sends scope, slugs and timestamps.
 export type JsonSchema = {

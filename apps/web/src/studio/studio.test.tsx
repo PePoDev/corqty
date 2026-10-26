@@ -220,6 +220,31 @@ it("the palette lists the latest definitions and blueprints and filters them", a
   expect(within(blueprintList).getByText("Data processing")).toBeInTheDocument()
 })
 
+it("the palette offers the shell preset only while shell is enabled", async () => {
+  let shellEnabled = false
+  let reads = 0
+  server.use(
+    http.get("/api/v1/orgs/:organizationId/settings", () => {
+      reads += 1
+      return HttpResponse.json({ shellEnabled })
+    }),
+  )
+  renderStudio()
+  const definitions = await screen.findByRole("list", {
+    name: "Node definitions",
+  })
+  await waitFor(() => expect(reads).toBe(1))
+  expect(within(definitions).getByText("Mock task")).toBeInTheDocument()
+  expect(
+    within(definitions).queryByText("Shell command"),
+  ).not.toBeInTheDocument()
+
+  // An admin enables shell elsewhere; coming back to the tab refetches.
+  shellEnabled = true
+  window.dispatchEvent(new Event("visibilitychange"))
+  expect(await within(definitions).findByText("Shell command")).toBeVisible()
+})
+
 it("dropping a definition adds a node with a fresh id at the drop point", async () => {
   withDraft({ ...infrastructure.graph, nodes: [], edges: [] })
   renderStudio()

@@ -9,6 +9,7 @@ import type {
   Invitation,
   Member,
   NodeDefinition,
+  OrganizationSettings,
   Role,
   Run,
   RunSummary,
@@ -24,6 +25,8 @@ export const queryKeys = {
     ["orgs", organizationId, "members"] as const,
   auditEvents: (organizationId: string) =>
     ["orgs", organizationId, "audit-events"] as const,
+  settings: (organizationId: string) =>
+    ["orgs", organizationId, "settings"] as const,
   workflows: (organizationId: string) =>
     ["orgs", organizationId, "workflows"] as const,
   workflow: (organizationId: string, workflowId: string) =>
@@ -113,6 +116,26 @@ export function useRemoveMember(organizationId: string) {
   return useOrganizationMutation(organizationId, (userId: string) =>
     api<void>(`/orgs/${organizationId}/members/${userId}`, {
       method: "DELETE",
+    }),
+  )
+}
+
+export function useSettings(organizationId: string) {
+  return useQuery({
+    queryKey: queryKeys.settings(organizationId),
+    queryFn: ({ signal }) =>
+      api<OrganizationSettings>(`/orgs/${organizationId}/settings`, {
+        signal,
+      }),
+  })
+}
+
+// The refresh that follows brings the new value back through useSettings.
+export function useSetShellEnabled(organizationId: string) {
+  return useOrganizationMutation(organizationId, (enabled: boolean) =>
+    api<OrganizationSettings>(`/orgs/${organizationId}/settings/shell`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
     }),
   )
 }

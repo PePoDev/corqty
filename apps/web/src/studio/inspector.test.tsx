@@ -4,8 +4,9 @@ import { useState } from "react"
 import { expect, it, vi } from "vitest"
 
 import type { GraphNode, GraphSnapshot, JsonSchema } from "@/api/types"
+import { newNodeFromDefinition } from "@/studio/graph-model"
 import { Inspector } from "@/studio/inspector"
-import { blueprints, nodeDefinitions } from "@/test/handlers"
+import { blueprints, nodeDefinitions, shellCommand } from "@/test/handlers"
 
 const infrastructure = blueprints[1].graph // vpc -> rds, vpc -> deploy
 const secretId = "0190f5c2-7d1e-7a00-8000-0000000000aa"
@@ -80,6 +81,16 @@ it("edits the node's name and its configuration through the uiSchema widgets", a
     delayMs: 500,
     failureMessage: "boom",
   })
+})
+
+it("warns before a shell node is configured", () => {
+  const shell = newNodeFromDefinition(shellCommand, { x: 0, y: 0 })
+  const graph = { ...infrastructure, nodes: [shell], edges: [] }
+  renderInspector(shell.id, { graph })
+  expect(screen.getByRole("alert")).toHaveTextContent("Trusted users only")
+  expect(screen.getByLabelText("Command")).toHaveValue(
+    `jq '{result: .}' "$CORQTY_INPUT" > "$CORQTY_OUTPUT"`,
+  )
 })
 
 it("shows where a connected input comes from instead of an editor", () => {

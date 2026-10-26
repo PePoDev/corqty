@@ -122,7 +122,7 @@ function port(
   return { name, dataType, schema, required, description: "" }
 }
 
-// Every seeded definition is version 1 and runs on the mock executor.
+// The seeded mock definitions are version 1 and share the mock config.
 function seeded(
   definition: Pick<
     NodeDefinition,
@@ -154,6 +154,44 @@ function seeded(
 }
 
 const vpcIdSchema: JsonSchema = { type: "string", pattern: "^vpc-" }
+
+// The trusted shell preset: the palette offers it once an admin enables shell.
+export const shellCommand: NodeDefinition = {
+  id: "00000000-0000-7000-8000-000000000007",
+  key: "corqty.shell.command",
+  version: 1,
+  displayName: "Shell command",
+  description:
+    "Trusted: runs a shell command inside the worker container. Not a security boundary.",
+  category: "Shell (trusted)",
+  deprecated: false,
+  inputs: [port("input", "core.any", {})],
+  outputs: [port("result", "core.any", {})],
+  configSchema: {
+    type: "object",
+    properties: {
+      command: {
+        type: "string",
+        minLength: 1,
+        maxLength: 16384,
+        title: "Command",
+      },
+      env: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        title: "Environment",
+      },
+    },
+    required: ["command"],
+    additionalProperties: false,
+  },
+  uiSchema: { command: { widget: "textarea" }, env: { widget: "keyValue" } },
+  defaults: {
+    command: `jq '{result: .}' "$CORQTY_INPUT" > "$CORQTY_OUTPUT"`,
+    env: {},
+  },
+  executor: { key: "shell", version: "1.0.0" },
+}
 
 // The seeded system catalog, in API order (key, then version).
 export const nodeDefinitions: NodeDefinition[] = [
@@ -194,6 +232,7 @@ export const nodeDefinitions: NodeDefinition[] = [
     { result: { ok: true } },
     0,
   ),
+  shellCommand,
   seeded(
     {
       id: "00000000-0000-7000-8000-000000000003",
@@ -410,6 +449,9 @@ export const handlers = [
   ),
   http.get("/api/v1/orgs/:organizationId/audit-events", () =>
     HttpResponse.json({ items: auditEvents }),
+  ),
+  http.get("/api/v1/orgs/:organizationId/settings", () =>
+    HttpResponse.json({ shellEnabled: false }),
   ),
   http.get("/api/v1/orgs/:organizationId/workflows", () =>
     HttpResponse.json({ items: workflows }),

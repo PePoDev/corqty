@@ -11,6 +11,7 @@ import {
   useBlueprints,
   useNodeDefinitions,
   usePublishWorkflow,
+  useSettings,
   useValidateWorkflow,
   useWorkflow,
 } from "@/api/queries"
@@ -100,6 +101,12 @@ function Editor({
   )
   const validate = useValidateWorkflow(organizationId, workflow.id)
   const publish = usePublishWorkflow(organizationId, workflow.id)
+  const settings = useSettings(organizationId)
+  // The shell preset (and any definition on the shell executor) is offered
+  // only once an admin enables shell.
+  const paletteDefinitions = settings.data?.shellEnabled
+    ? definitions
+    : definitions.filter(({ executor }) => executor.key !== "shell")
   const queryClient = useQueryClient()
   const [problems, setProblems] = useState<{
     graph: GraphSnapshot
@@ -282,7 +289,7 @@ function Editor({
         )}
       >
         {!readOnlyReason && (
-          <Palette definitions={definitions} blueprints={blueprints} />
+          <Palette definitions={paletteDefinitions} blueprints={blueprints} />
         )}
         <StudioCanvas
           graph={workflow.draft.graph}
