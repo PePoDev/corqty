@@ -6,6 +6,7 @@ pub mod authz;
 pub mod catalog;
 pub mod config;
 pub mod error;
+pub mod events;
 pub mod extract;
 pub mod loops;
 pub mod organizations;

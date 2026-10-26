@@ -12,6 +12,7 @@ base64.workspace = true
 chrono.workspace = true
 corqty-domain = { path = "../domain" }
 corqty-persistence = { path = "../persistence" }
+futures-util.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true

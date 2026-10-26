@@ -284,6 +284,14 @@ async fn run_routes_enforce_capabilities() {
             Capability::RunWorkflows,
         ),
         (Method::GET, run.clone(), "", Capability::ViewOrganization),
+        // The run stays queued, since only the viewer tries to cancel it, so its event
+        // stream opens with 200 rather than 204. The test drops it unread.
+        (
+            Method::GET,
+            format!("{run}/events"),
+            "",
+            Capability::ViewOrganization,
+        ),
         (
             Method::POST,
             format!("{run}/rerun"),

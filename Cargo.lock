@@ -280,6 +280,7 @@ dependencies = [
  "corqty-domain",
  "corqty-persistence",
  "corqty-test-support",
+ "futures-util",
  "getrandom 0.3.4",
  "serde",
  "serde_json",
