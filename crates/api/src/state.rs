@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use corqty_persistence::store::PgStore;
+use tokio_util::sync::CancellationToken;
 
 use crate::{auth::crypto::PasswordEngine, config::ApiConfig};
 
@@ -9,6 +10,8 @@ pub struct AppState {
     pub store: PgStore,
     pub config: ApiConfig,
     pub dummy_password_hash: Arc<str>,
+    /// Cancelled on ctrl-c or SIGTERM; the server and long-lived tasks stop on it.
+    pub shutdown: CancellationToken,
 }
 
 impl AppState {
@@ -20,6 +23,7 @@ impl AppState {
             dummy_password_hash: PasswordEngine::hash("corqty dummy password value")
                 .expect("dummy password hash")
                 .into(),
+            shutdown: CancellationToken::new(),
         }
     }
 }

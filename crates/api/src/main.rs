@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use corqty_api::{config::ApiConfig, router::build_router, state::AppState};
+use corqty_api::{config::ApiConfig, serve, state::AppState};
 use corqty_persistence::store::PgStore;
 use sqlx::postgres::PgPoolOptions;
 
@@ -18,10 +18,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&config.database_url)
         .await?;
     let listener = tokio::net::TcpListener::bind(&config.bind_address).await?;
-    axum::serve(
-        listener,
-        build_router(AppState::new(PgStore::new(pool), config)),
-    )
-    .await?;
+    let state = AppState::new(PgStore::new(pool), config);
+    let shutdown = state.shutdown.clone();
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        tracing::info!("shutting down: finishing open requests");
+        shutdown.cancel();
+    });
+    serve(listener, state).await?;
     Ok(())
+}
+
+/// Resolves on ctrl-c, or on SIGTERM (what `docker compose stop` sends) on unix.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("install the ctrl-c handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("install the SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
 }
