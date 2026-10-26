@@ -166,7 +166,7 @@ impl AuthFixture {
             .unwrap()
     }
 
-    async fn request_json(&self, method: Method, path: &str, json: &str) -> Response {
+    pub async fn request_json(&self, method: Method, path: &str, json: &str) -> Response {
         self.app
             .clone()
             .oneshot(

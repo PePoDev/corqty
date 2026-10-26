@@ -1,4 +1,4 @@
-use corqty_domain::account::OrganizationName;
+use corqty_domain::{account::OrganizationName, slug::slugify};
 use corqty_persistence::models::{OrganizationMembershipRecord, SessionRecord};
 use uuid::Uuid;
 
@@ -12,28 +12,9 @@ pub async fn create(
     let name = OrganizationName::parse(name)
         .map_err(|_| ApiError::Validation("invalid_organization_name"))?;
     let organization_id = Uuid::new_v4();
-    let prefix = name
-        .as_str()
-        .to_lowercase()
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_owned();
-    let slug = format!(
-        "{}-{}",
-        if prefix.is_empty() { "org" } else { &prefix },
-        &organization_id.simple().to_string()[..8]
-    );
-    state
+    let slug = slugify(name.as_str(), "org", organization_id);
+    Ok(state
         .store
         .create_organization(session.user_id, organization_id, name.as_str(), &slug)
-        .await
-        .map_err(|_| ApiError::Internal)
+        .await?)
 }

@@ -1,4 +1,8 @@
-import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom"
+"use client"
+
+import Link from "next/link"
+import { usePathname, useRouter } from "next/navigation"
+import type { ReactNode } from "react"
 
 import { api } from "@/api/client"
 import { useAuth } from "@/auth/auth-context"
@@ -8,14 +12,22 @@ import { Separator } from "@/components/ui/separator"
 
 const links = [
   { label: "Overview", suffix: "" },
+  { label: "Workflows", suffix: "/workflows" },
+  { label: "Catalog", suffix: "/catalog" },
   { label: "Members", suffix: "/members" },
   { label: "Audit log", suffix: "/audit" },
 ]
 
-export function AppShell() {
-  const { organizationId } = useParams()
+export function AppShell({
+  organizationId,
+  children,
+}: {
+  organizationId: string
+  children: ReactNode
+}) {
   const { me, refresh } = useAuth()
-  const navigate = useNavigate()
+  const router = useRouter()
+  const pathname = usePathname()
   const membership = me?.organizations.find(
     (organization) => organization.organizationId === organizationId,
   )
@@ -25,8 +37,8 @@ export function AppShell() {
 
   async function logout() {
     await api("/auth/logout", { method: "POST" })
+    // With `me` cleared, the auth gate sends the browser to /login.
     await refresh()
-    navigate("/login")
   }
 
   return (
@@ -48,7 +60,7 @@ export function AppShell() {
           aria-label="Organization"
           className="ml-auto h-9 max-w-48 rounded-md border bg-background px-2 text-sm md:ml-0 md:max-w-none"
           value={membership.organizationId}
-          onChange={(event) => navigate(`/orgs/${event.target.value}`)}
+          onChange={(event) => router.push(`/orgs/${event.target.value}`)}
         >
           {me.organizations.map((organization) => (
             <option
@@ -64,22 +76,26 @@ export function AppShell() {
           aria-label="Organization"
           className="order-3 mt-3 flex basis-full gap-1 overflow-x-auto md:order-none md:mt-0 md:flex-col"
         >
-          {links.map((link) => (
-            <NavLink
-              key={link.label}
-              end={link.suffix === ""}
-              to={`/orgs/${membership.organizationId}${link.suffix}`}
-              className={({ isActive }) =>
-                `rounded-md px-3 py-2 text-sm ${
-                  isActive
+          {links.map((link) => {
+            const href = `/orgs/${membership.organizationId}${link.suffix}`
+            const active = link.suffix
+              ? pathname.startsWith(href)
+              : pathname === href
+            return (
+              <Link
+                key={link.label}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`rounded-md px-3 py-2 text-sm ${
+                  active
                     ? "bg-sidebar-accent font-medium"
                     : "text-muted-foreground"
-                }`
-              }
-            >
-              {link.label}
-            </NavLink>
-          ))}
+                }`}
+              >
+                {link.label}
+              </Link>
+            )
+          })}
         </nav>
         <div className="ml-2 flex items-center gap-2 md:mt-auto md:ml-0 md:flex-col md:items-stretch md:gap-2 md:border-t md:pt-3">
           <span className="hidden truncate px-2 text-xs text-muted-foreground md:block">
@@ -94,7 +110,7 @@ export function AppShell() {
         </div>
       </aside>
       <main id="main-content" className="min-w-0">
-        <Outlet />
+        {children}
       </main>
     </div>
   )

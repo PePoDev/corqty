@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Approved; Milestone 1 foundation implemented
+**Status:** Approved; Milestone 1 foundation and Milestone 2 catalog and studio implemented
 
 ## 1. Product summary
 
@@ -46,7 +46,7 @@ Corqty is a modular monorepo with separately runnable web, API, migration, and w
 
 ```mermaid
 flowchart LR
-    Browser["React + XYFlow + shadcn/ui"]
+    Browser["Next.js + React + XYFlow + shadcn/ui"]
     Trigger["Manual / API / Cron / Webhook"]
     API["Rust Axum API<br/>auth, RBAC, workflows, triggers, SSE"]
     DB[("PostgreSQL<br/>data, queue, events, secrets")]
@@ -80,7 +80,7 @@ Multiple API replicas may run these loops because database locks and uniqueness 
 
 The implementation will use these responsibility boundaries:
 
-- `apps/web`: React application, routes, XYFlow editor, schema widgets, API client, and tests.
+- `apps/web`: Next.js App Router application with React client components, routes, XYFlow editor, schema widgets, API client, and tests.
 - `crates/api`: Axum HTTP/SSE server and API background loops.
 - `crates/worker`: job claiming, leases, cancellation, plugin invocation, and result persistence.
 - `crates/domain`: graph, RBAC, run-state, validation, and plugin-domain types with no HTTP or SQL dependencies.
@@ -98,7 +98,7 @@ Each executable depends on shared crates; API handlers do not contain scheduling
 
 - A new user registers with email/password and creates an organization; that user becomes an `admin`.
 - An admin generates a time-limited invitation link for an email and role. SMTP delivery is outside the first release; the UI makes the link copyable.
-- Invitation plaintext appears only in the SPA URL fragment and is submitted in an authenticated `POST` body; it is never placed in an HTTP path or query string.
+- Invitation plaintext appears only in the web application's URL fragment, which the browser never sends to the server; the accept page reads it client-side and submits it in an authenticated `POST` body. It is never placed in an HTTP path or query string.
 - Users may belong to multiple organizations and select the active organization in the application shell.
 - There is no `owner` role.
 - An organization must always retain at least one admin. Removing or demoting the final admin is rejected transactionally.
@@ -524,7 +524,7 @@ Both are copy-on-apply, editable drafts. The node library also exposes a configu
 - `migrate`: one-shot SQL migrations and system seed data
 - `api`: Axum API plus cron, lease-recovery, and retention loops
 - `worker`: Rust worker with built-in plugins
-- `web`: Vite development server with API/SSE proxying
+- `web`: Next.js development server whose rewrites proxy `/api/v1` to the API
 
 The API and worker wait for successful migrations. Migrations and system seeds are idempotent. Local registration creates the first admin and organization.
 
@@ -602,6 +602,19 @@ The product is one integrated first release, but implementation is split into in
 
 Each milestone receives its own implementation plan and must leave the repository runnable. Later milestone plans may refine file-level details without changing the approved behavior in this specification.
 
+### Milestone 2 decisions
+
+- The web application uses the Next.js App Router instead of Vite and React Router. Every API call still runs in the browser against the same-origin `/api/v1`.
+- Graphs reference node definitions by key and integer version. System keys start with `corqty.` and organization keys must not; versions count from 1 per organization and key. Definitions and blueprints are immutable and have no delete endpoint. A deprecated definition is hidden from the palette but stays valid in drafts and publishes.
+- The audit events `workflow.created`, `workflow.draft_saved`, `workflow.published`, `node_definition.created`, `node_definition.deprecated`, and `blueprint.created` are written in the same transaction as the change and carry only identifiers, keys, versions, revisions, and checksums. Failed operations write nothing.
+- The only built-in executor is `mock` 1.0.0, from a static compiled registry; any other executor makes a definition or graph invalid. The shell preset is deferred to Milestone 3.
+- Drafts may hold secret references, but publishing reports every reference as not found until secrets arrive in Milestone 4. A plaintext value in a secret-reference field is always rejected.
+- The server computes the version checksum as SHA-256 over the canonical graph JSON with sorted object keys. The viewport is part of the snapshot and therefore of the checksum.
+- Draft saves accept any graph that parses and stays within the size limits; full validation runs only on Validate and Publish. Publishing names an exact draft revision, and each revision is published at most once.
+- Applying a blueprint is `POST /orgs/{org_id}/workflows` with a `blueprintId`; the server copies the graph with fresh node and edge identifiers.
+- Graph and timeout limits are fixed constants in Milestone 2; deployment configuration is deferred to Milestone 5.
+- User JSON Schemas are self-contained (no `$ref`, `$dynamicRef`, or `$recursiveRef`), use Draft 2020-12 throughout, and are at most 16 KiB each. A node definition has at most 50 input ports and 50 output ports, and one validation reports at most 200 diagnostics.
+
 ## 20. Acceptance criteria
 
 The release is complete when:
@@ -622,6 +635,7 @@ The release is complete when:
 ## 21. Documentation references checked during design
 
 - XYFlow custom nodes, handles, and connection validation: `@xyflow/react`
+- Next.js App Router route groups, client components, and rewrites to a same-origin API: `next`
 - shadcn/ui current theming and component-composition guidance
 - Axum middleware, modular routing, and SSE support
 - Wasmtime Component hosting, fuel limits, deadlines, and capability-controlled WASI access

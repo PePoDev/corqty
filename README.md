@@ -2,6 +2,9 @@
 
 Generic visual workflow orchestration. Milestone 1 provides the multi-tenant
 account, RBAC, audit, API, React shell, PostgreSQL, and Docker foundations.
+Milestone 2 adds the workflow catalog and studio: versioned node definitions
+and blueprints, a Next.js and XYFlow editor with typed connections and
+automatic draft saves, and validated, immutable published versions.
 
 ## Local start
 
@@ -11,7 +14,7 @@ docker compose up --build --wait
 ./scripts/smoke-foundation.ps1
 ```
 
-Open http://localhost:5173 and create the first account and organization.
+Open http://localhost:3000 and create the first account and organization.
 The host ports can be changed with `CORQTY_POSTGRES_PORT`,
 `CORQTY_API_PORT`, and `CORQTY_WEB_PORT`.
 
@@ -33,3 +36,6 @@ The test database is disposable:
 ```powershell
 docker compose -f docker-compose.test.yml down -v
 ```
+
+After upgrading to Milestone 2, recreate local databases once:
+`docker compose down -v` and `docker compose -f docker-compose.test.yml down -v`.
