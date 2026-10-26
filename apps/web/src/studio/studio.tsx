@@ -25,6 +25,8 @@ import { useCan } from "@/auth/use-can"
 import { StatusBadge } from "@/components/status/status-badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { RunDialog } from "@/runs/run-dialog"
+import { RunsDrawer } from "@/runs/runs-drawer"
 import { mapDiagnostics, type MappedDiagnostic } from "@/studio/diagnostics"
 import { Palette } from "@/studio/palette"
 import { useDraftAutosave, type SavedDraft } from "@/studio/use-draft-autosave"
@@ -83,6 +85,7 @@ function Editor({
 }) {
   const canEdit = useCan(organizationId, "edit_workflows")
   const canPublish = useCan(organizationId, "publish_workflows")
+  const canRun = useCan(organizationId, "run_workflows")
   const wide = useWideScreen()
   const readOnlyReason = !canEdit
     ? "Your role can view this workflow but not edit it."
@@ -206,23 +209,34 @@ function Editor({
           </span>
         )}
         <span aria-live="polite">{notice}</span>
-        {canPublish && (
-          <div className="ml-auto flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy || conflict}
-              onClick={() => void run(validateDraft)}
-            >
-              Validate
-            </Button>
-            <Button
-              size="sm"
-              disabled={busy || conflict}
-              onClick={() => void run(publishDraft)}
-            >
-              Publish
-            </Button>
+        {(canPublish || canRun) && (
+          <div className="ml-auto flex items-center gap-2">
+            {canPublish && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy || conflict}
+                  onClick={() => void run(validateDraft)}
+                >
+                  Validate
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy || conflict}
+                  onClick={() => void run(publishDraft)}
+                >
+                  Publish
+                </Button>
+              </>
+            )}
+            {canRun && (
+              <RunDialog
+                organizationId={organizationId}
+                workflowId={workflow.id}
+                version={workflow.publishedVersion}
+              />
+            )}
           </div>
         )}
       </header>
@@ -279,6 +293,7 @@ function Editor({
           onChange={autosave.edit}
         />
       </div>
+      <RunsDrawer organizationId={organizationId} workflowId={workflow.id} />
     </section>
   )
 }

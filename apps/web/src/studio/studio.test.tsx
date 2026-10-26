@@ -23,8 +23,14 @@ import { Studio } from "@/studio/studio"
 // Loaded up front so next/dynamic resolves within the findBy timeouts even
 // on a cold start.
 import "@/studio/studio-canvas"
-import { blueprints, meAs, nodeDefinitions, workflow } from "@/test/handlers"
-import { renderWithProviders } from "@/test/render"
+import {
+  blueprints,
+  meAs,
+  nodeDefinitions,
+  runs,
+  workflow,
+} from "@/test/handlers"
+import { renderWithProviders, router } from "@/test/render"
 import { server } from "@/test/server"
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -608,9 +614,12 @@ it("publishing reports the new version, then that the draft already has one", as
   ).toBeInTheDocument()
 })
 
-it.each(["runner", "viewer"] as const)(
-  "a %s cannot validate or publish",
-  async (role) => {
+it.each([
+  { role: "runner" as const, canRun: true },
+  { role: "viewer" as const, canRun: false },
+])(
+  "a $role cannot validate or publish, and runs only with run_workflows",
+  async ({ role, canRun }) => {
     server.use(http.get("/api/v1/auth/me", () => HttpResponse.json(meAs(role))))
     renderStudio()
     await screen.findByRole("group", { name: "Create VPC (simulated)" })
@@ -621,5 +630,152 @@ it.each(["runner", "viewer"] as const)(
     expect(
       screen.queryByRole("button", { name: "Publish" }),
     ).not.toBeInTheDocument()
+    expect(Boolean(screen.queryByRole("button", { name: "Run" }))).toBe(canRun)
   },
 )
+
+async function openRunDialog() {
+  await userEvent.click(await screen.findByRole("button", { name: "Run" }))
+  return screen.findByRole("dialog", { name: "Run workflow" })
+}
+
+it("Run starts the published version with its inputs and opens the run", async () => {
+  const started: unknown[] = []
+  server.use(
+    // The published version asks for other inputs than the draft.
+    http.get(`${workflowUrl}/versions/:version`, ({ params }) =>
+      HttpResponse.json({
+        version: Number(params.version),
+        graph: {
+          ...infrastructure.graph,
+          workflowInputSchema: {
+            type: "object",
+            properties: {
+              region: { type: "string", title: "Region", default: "us-east-1" },
+              replicas: { type: "integer", title: "Replicas" },
+            },
+            required: ["region"],
+          },
+        },
+      }),
+    ),
+    http.post(`${workflowUrl}/runs`, async ({ request }) => {
+      started.push(await request.json())
+      return HttpResponse.json(
+        { ...runs[0], id: "run-3", status: "queued" },
+        { status: 201 },
+      )
+    }),
+  )
+  renderStudio()
+  const dialog = await openRunDialog()
+  expect(
+    within(dialog).getByText("Starts published version 1 with these inputs."),
+  ).toBeInTheDocument()
+  const region = await within(dialog).findByLabelText("Region")
+  expect(region).toHaveValue("us-east-1")
+  expect(within(dialog).getByLabelText("Replicas")).toHaveValue(null)
+  await userEvent.clear(region)
+  await userEvent.type(region, "eu-west-1")
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Start run" }),
+  )
+
+  await waitFor(() =>
+    expect(router.push).toHaveBeenCalledWith("/orgs/org-1/runs/run-3"),
+  )
+  expect(started).toEqual([{ input: { region: "eu-west-1" }, version: 1 }])
+})
+
+it("Run shows why a run could not start", async () => {
+  server.use(
+    http.post(`${workflowUrl}/runs`, () =>
+      problem(422, "run_input_invalid", [
+        {
+          code: "invalid_value",
+          pointer: "/region",
+          message: "The value is shorter than 1 character.",
+        },
+      ]),
+    ),
+  )
+  renderStudio()
+  const dialog = await openRunDialog()
+  const start = await within(dialog).findByRole("button", { name: "Start run" })
+  await userEvent.click(start)
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "/region The value is shorter than 1 character.",
+  )
+
+  server.use(
+    http.post(`${workflowUrl}/runs`, () =>
+      problem(409, "workflow_not_published"),
+    ),
+  )
+  await userEvent.click(start)
+  await waitFor(() =>
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "The run could not be started (workflow_not_published).",
+    ),
+  )
+  expect(router.push).not.toHaveBeenCalled()
+})
+
+it("Run waits until the workflow is published", async () => {
+  server.use(
+    http.get(workflowUrl, () =>
+      HttpResponse.json({ ...workflow, publishedVersion: null }),
+    ),
+  )
+  renderStudio()
+  const run = await screen.findByRole("button", { name: "Run" })
+  expect(run).toBeDisabled()
+  expect(run).toHaveAccessibleDescription(
+    "Publish the workflow before running it.",
+  )
+})
+
+it("the runs drawer opens on the recent runs with links to each run", async () => {
+  renderStudio()
+  const toggle = await screen.findByRole("button", { name: "Runs" })
+  const panel = document.getElementById(
+    toggle.getAttribute("aria-controls") ?? "",
+  )
+  if (!panel) throw new Error("No runs panel")
+  expect(toggle).toHaveAttribute("aria-expanded", "false")
+  expect(panel).not.toBeVisible()
+
+  await userEvent.click(toggle)
+  expect(toggle).toHaveAttribute("aria-expanded", "true")
+  expect(panel).toBeVisible()
+  expect(
+    within(panel).getByRole("tab", { name: "Recent runs" }),
+  ).toHaveAttribute("aria-selected", "true")
+  const rows = (await within(panel).findAllByRole("row")).slice(1)
+  expect(
+    rows.map((row) => within(row).getByRole("link").getAttribute("href")),
+  ).toEqual(["/orgs/org-1/runs/run-2", "/orgs/org-1/runs/run-1"])
+  expect(within(rows[0]).getByText("Running")).toBeInTheDocument()
+  expect(within(rows[1]).getByText("Succeeded")).toBeInTheDocument()
+  expect(within(rows[1]).getByText("v1")).toBeInTheDocument()
+
+  await userEvent.click(toggle)
+  expect(panel).not.toBeVisible()
+})
+
+it("the read-only studio on a narrow screen still lists the recent runs", async () => {
+  Object.assign(window, { innerWidth: 800 })
+  renderStudio()
+  expect(
+    await screen.findByText(
+      "Editing needs a screen at least 1024 pixels wide.",
+    ),
+  ).toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button", { name: "Runs" }))
+  const drawer = screen.getByRole("region", { name: "Runs" })
+  const links = await within(drawer).findAllByRole("link")
+  expect(links.map((link) => link.getAttribute("href"))).toEqual([
+    "/orgs/org-1/runs/run-2",
+    "/orgs/org-1/runs/run-1",
+  ])
+})

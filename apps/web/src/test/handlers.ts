@@ -12,8 +12,10 @@ import type {
   NodeDefinition,
   PortSpec,
   Role,
+  RunSummary,
   Workflow,
   WorkflowSummary,
+  WorkflowVersion,
 } from "@/api/types"
 
 const capabilities: Record<Role, Capability[]> = {
@@ -329,6 +331,38 @@ export const workflow: Workflow = {
   draft: { revision: 3, graph: blueprints[1].graph },
 }
 
+// Its v1 was published from that draft.
+export const workflowVersion: WorkflowVersion = {
+  version: 1,
+  graph: blueprints[1].graph,
+}
+
+// Newest first, as the API lists them.
+export const runs: RunSummary[] = [
+  {
+    id: "run-2",
+    workflowId: "wf-2",
+    version: 1,
+    status: "running",
+    triggerSource: "manual",
+    createdAt: "2026-10-26T09:00:00Z",
+    startedAt: "2026-10-26T09:00:01Z",
+    finishedAt: null,
+    cancelRequested: false,
+  },
+  {
+    id: "run-1",
+    workflowId: "wf-2",
+    version: 1,
+    status: "succeeded",
+    triggerSource: "manual",
+    createdAt: "2026-10-25T09:00:00Z",
+    startedAt: "2026-10-25T09:00:01Z",
+    finishedAt: "2026-10-25T09:00:04Z",
+    cancelRequested: false,
+  },
+]
+
 // A signed-in admin of org-1 who reads data and saves drafts; tests override
 // other writes and failures.
 export const handlers = [
@@ -351,6 +385,13 @@ export const handlers = [
       const { revision } = (await request.json()) as { revision: number }
       return HttpResponse.json({ revision: revision + 1 })
     },
+  ),
+  http.get(
+    "/api/v1/orgs/:organizationId/workflows/:workflowId/versions/:version",
+    () => HttpResponse.json(workflowVersion),
+  ),
+  http.get("/api/v1/orgs/:organizationId/workflows/:workflowId/runs", () =>
+    HttpResponse.json({ items: runs }),
   ),
   http.get("/api/v1/orgs/:organizationId/node-definitions", () =>
     HttpResponse.json({ items: nodeDefinitions }),

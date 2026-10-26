@@ -146,3 +146,59 @@ export interface Workflow {
 export interface VersionSummary {
   version: number
 }
+
+export interface WorkflowVersion extends VersionSummary {
+  graph: GraphSnapshot
+}
+
+// Run payloads list every field; a missing value is null.
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+
+export type NodeRunState =
+  | "blocked"
+  | "queued"
+  | "running"
+  | "retry_wait"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+  | "skipped"
+
+export interface RunSummary {
+  id: string
+  workflowId: string
+  version: number
+  status: RunStatus
+  triggerSource: string
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  cancelRequested: boolean
+}
+
+export interface NodeRun {
+  nodeId: string
+  state: NodeRunState
+  attempt: number
+  maxAttempts: number
+  executor: string
+  queueReason: "waiting_for_compatible_worker" | null
+  input: Record<string, unknown> | null
+  output: Record<string, unknown> | null
+  error: { code: string; message: string; retryable: boolean } | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export type Run = RunSummary & {
+  workflowName: string
+  input: Record<string, unknown>
+  lastEventSeq: number
+  graph: GraphSnapshot
+  nodes: NodeRun[]
+}

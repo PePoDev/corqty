@@ -21,6 +21,21 @@ const statuses = {
     className: "border-blue-600/40 text-blue-700 dark:text-blue-400",
   },
   "read-only": { label: "Read-only", className: "text-muted-foreground" },
+  // Run statuses (RunStatus).
+  queued: { label: "Queued", className: "text-muted-foreground" },
+  running: {
+    label: "Running",
+    className: "border-blue-600/40 text-blue-700 dark:text-blue-400",
+  },
+  succeeded: {
+    label: "Succeeded",
+    className: "border-emerald-600/40 text-emerald-700 dark:text-emerald-400",
+  },
+  failed: {
+    label: "Failed",
+    className: "border-red-600/40 text-red-700 dark:text-red-400",
+  },
+  canceled: { label: "Canceled", className: "text-muted-foreground" },
 }
 
 export type Status = keyof typeof statuses

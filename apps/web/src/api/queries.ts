@@ -10,9 +10,12 @@ import type {
   Member,
   NodeDefinition,
   Role,
+  Run,
+  RunSummary,
   VersionSummary,
   Workflow,
   WorkflowSummary,
+  WorkflowVersion,
 } from "@/api/types"
 
 export const queryKeys = {
@@ -25,6 +28,21 @@ export const queryKeys = {
     ["orgs", organizationId, "workflows"] as const,
   workflow: (organizationId: string, workflowId: string) =>
     ["orgs", organizationId, "workflows", workflowId] as const,
+  workflowVersion: (
+    organizationId: string,
+    workflowId: string,
+    version: number,
+  ) =>
+    [
+      "orgs",
+      organizationId,
+      "workflows",
+      workflowId,
+      "versions",
+      version,
+    ] as const,
+  runs: (organizationId: string, workflowId: string) =>
+    ["orgs", organizationId, "workflows", workflowId, "runs"] as const,
   nodeDefinitions: (organizationId: string) =>
     ["orgs", organizationId, "node-definitions"] as const,
   blueprints: (organizationId: string) =>
@@ -167,5 +185,43 @@ export function usePublishWorkflow(organizationId: string, workflowId: string) {
       `/orgs/${organizationId}/workflows/${workflowId}/publish`,
       { method: "POST", body: JSON.stringify({ revision }) },
     ),
+  )
+}
+
+export function useWorkflowVersion(
+  organizationId: string,
+  workflowId: string,
+  version: number,
+) {
+  return useQuery({
+    queryKey: queryKeys.workflowVersion(organizationId, workflowId, version),
+    queryFn: ({ signal }) =>
+      api<WorkflowVersion>(
+        `/orgs/${organizationId}/workflows/${workflowId}/versions/${version}`,
+        { signal },
+      ),
+  })
+}
+
+export function useRuns(organizationId: string, workflowId: string) {
+  return useQuery({
+    queryKey: queryKeys.runs(organizationId, workflowId),
+    queryFn: ({ signal }) =>
+      api<{ items: RunSummary[] }>(
+        `/orgs/${organizationId}/workflows/${workflowId}/runs`,
+        { signal },
+      ),
+  })
+}
+
+// Runs the given published version, not the draft.
+export function useStartRun(organizationId: string, workflowId: string) {
+  return useOrganizationMutation(
+    organizationId,
+    (body: { input: Record<string, unknown>; version: number }) =>
+      api<Run>(`/orgs/${organizationId}/workflows/${workflowId}/runs`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   )
 }
