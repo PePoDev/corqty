@@ -303,6 +303,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "corqty-executor-mock"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "corqty-domain",
+ "corqty-plugin-sdk",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "corqty-migrator"
 version = "0.1.0"
 dependencies = [
