@@ -402,6 +402,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "corqty-worker"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "corqty-domain",
+ "corqty-executor-mock",
+ "corqty-executor-shell",
+ "corqty-persistence",
+ "corqty-plugin-host",
+ "corqty-plugin-sdk",
+ "corqty-test-support",
+ "futures-util",
+ "serde_json",
+ "serial_test",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -10,6 +10,7 @@ members = [
   "crates/plugin-host",
   "crates/plugin-sdk",
   "crates/test-support",
+  "crates/worker",
 ]
 
 [workspace.package]

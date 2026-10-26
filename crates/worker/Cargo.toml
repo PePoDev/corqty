@@ -1,0 +1,31 @@
+[package]
+name = "corqty-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+corqty-domain = { path = "../domain" }
+corqty-executor-mock = { path = "../executor-mock" }
+corqty-executor-shell = { path = "../executor-shell" }
+corqty-persistence = { path = "../persistence" }
+corqty-plugin-host = { path = "../plugin-host" }
+corqty-plugin-sdk = { path = "../plugin-sdk" }
+serde_json.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+corqty-test-support = { path = "../test-support" }
+futures-util.workspace = true
+serial_test = "3"
+
+[lints]
+workspace = true
