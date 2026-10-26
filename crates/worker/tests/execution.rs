@@ -26,6 +26,7 @@ use serde_json::{Map, Value, json};
 use serial_test::serial;
 use sqlx::{Postgres, Transaction};
 use tempfile::TempDir;
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
@@ -297,6 +298,36 @@ impl Executor for Recording {
     }
 }
 
+/// An executor that keeps its scratch directory for the test, waits until the test opens its
+/// gate, and returns `{"result": "done"}` without logging.
+#[derive(Clone, Default)]
+struct Gated {
+    scratch_dir: Arc<Mutex<Option<PathBuf>>>,
+    gate: Arc<Notify>,
+}
+
+impl Executor for Gated {
+    fn metadata(&self) -> ExecutorMetadata {
+        MOCK.metadata()
+    }
+
+    fn validate(&self, config: &Value) -> Vec<Diagnostic> {
+        MOCK.validate(config)
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _request: ExecuteRequest,
+        context: &'a ExecutionContext,
+    ) -> BoxFuture<'a, Result<Map<String, Value>, ExecutorError>> {
+        *self.scratch_dir.lock().unwrap() = Some(context.scratch_dir.clone());
+        Box::pin(async move {
+            self.gate.notified().await;
+            Ok(Map::from_iter([("result".to_owned(), json!("done"))]))
+        })
+    }
+}
+
 fn mock() -> Vec<Arc<dyn Executor>> {
     vec![Arc::new(MockExecutor)]
 }
@@ -460,6 +491,11 @@ async fn both_starter_blueprints_run_to_completion() {
         Some(&json!({"type": "run.state", "state": "queued", "seq": 1}))
     );
     assert_eq!(events.last().unwrap()["state"], "succeeded");
+    // The event that ends an attempt carries the attempt's input.
+    let rds = events
+        .iter()
+        .find(|event| event["nodeId"] == "rds" && event["state"] == "succeeded");
+    assert_eq!(rds.unwrap()["input"], json!({"vpcId": "vpc-0simulated"}));
     assert_eq!(fixture.scratch_entries(), 0);
 }
 
@@ -598,6 +634,44 @@ async fn a_retryable_failure_runs_again_with_the_same_execution_id_and_a_new_scr
             "retryable": true
         })
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn the_scratch_directory_stays_until_the_outcome_is_reported() {
+    let fixture = Fixture::new().await;
+    let run = fixture
+        .run(&graph(&[task("gated", json!({}))], &[]), json!({}))
+        .await;
+    let gated = Gated::default();
+    let worker = fixture.start(fixture.config(1), vec![Arc::new(gated.clone())]);
+    fixture.started(run, "gated").await;
+
+    // Completing locks the run first, so this lock holds the report back.
+    let owner = &fixture.database.owner;
+    let mut lock = owner.begin().await.unwrap();
+    sqlx::query("SELECT id FROM runs WHERE id = $1 FOR UPDATE")
+        .bind(run)
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+    gated.gate.notify_one();
+    eventually(|| async move {
+        let waiting: bool =
+            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted)")
+                .fetch_one(owner)
+                .await
+                .unwrap();
+        waiting.then_some(())
+    })
+    .await;
+    let scratch_dir = gated.scratch_dir.lock().unwrap().clone().unwrap();
+    assert!(scratch_dir.is_dir(), "removed before the report");
+
+    lock.commit().await.unwrap();
+    assert_eq!(fixture.finished(run).await, "succeeded");
+    worker.stop().await;
+    assert!(!scratch_dir.exists());
 }
 
 #[tokio::test]

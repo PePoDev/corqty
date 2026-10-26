@@ -304,6 +304,29 @@ async fn finished_runs_end_their_streams_and_answer_204_once_replayed() {
 
 #[tokio::test]
 #[serial]
+async fn each_user_keeps_at_most_8_streams_open() {
+    let admin = AuthFixture::registered("admin@example.com", "Acme").await;
+    let (path, _) = start_run(&admin).await;
+    let events = format!("{path}/events");
+    let mut streams = Vec::new();
+    for _ in 0..8 {
+        streams.push(Frames::new(open(&admin.app, &admin, &events, None).await));
+    }
+    let refused = body(
+        open(&admin.app, &admin, &events, None).await,
+        StatusCode::TOO_MANY_REQUESTS,
+    )
+    .await;
+    assert_eq!(refused["code"], "too_many_streams");
+
+    // A stream that ends gives its slot back.
+    drop(streams.remove(0));
+    let mut frames = Frames::new(open(&admin.app, &admin, &events, None).await);
+    assert_eq!(frames.next().await.as_deref(), Some("retry: 2000"));
+}
+
+#[tokio::test]
+#[serial]
 async fn the_server_stops_on_shutdown_although_a_stream_is_open() {
     let admin = AuthFixture::registered("admin@example.com", "Acme").await;
     let (path, _) = start_run(&admin).await;

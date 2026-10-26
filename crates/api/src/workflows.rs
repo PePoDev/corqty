@@ -11,7 +11,6 @@ use corqty_domain::{
 use corqty_persistence::{
     catalog,
     models::SessionRecord,
-    organizations,
     workflows::{self, VersionRecord, VersionSummaryRecord, WorkflowRecord, WorkflowSummaryRecord},
 };
 use serde::Deserialize;
@@ -23,6 +22,7 @@ use crate::{
     catalog::{Items, blocking},
     error::ApiError,
     extract::{ApiJson, ApiPath},
+    organizations::settings::shell_allowed,
     state::AppState,
 };
 
@@ -181,7 +181,7 @@ pub async fn validate(
     if !workflows::workflow_exists(&mut access.tx, workflow_id).await? {
         return Err(ApiError::NotFound);
     }
-    let shell_enabled = organizations::shell_enabled(&mut access.tx, organization_id).await?;
+    let shell_enabled = shell_allowed(&state, &mut access).await?;
     let definitions = catalog::definitions_map(&mut access.tx).await?;
     let (_, diagnostics) = blocking(body.graph, move |graph| {
         publish_diagnostics(graph, &definitions, shell_enabled)
@@ -239,7 +239,7 @@ pub async fn publish(
     if workflows::version_exists_for_revision(&mut access.tx, workflow_id, draft.revision).await? {
         return Err(ApiError::Conflict("draft_already_published"));
     }
-    let shell_enabled = organizations::shell_enabled(&mut access.tx, organization_id).await?;
+    let shell_enabled = shell_allowed(&state, &mut access).await?;
     let definitions = catalog::definitions_map(&mut access.tx).await?;
     let (graph, diagnostics) = blocking(draft.graph, move |graph| {
         publish_diagnostics(graph, &definitions, shell_enabled)
@@ -286,7 +286,7 @@ pub async fn get_version(
 }
 
 /// Every reason the organization cannot publish `graph`: the publish rules, then each shell
-/// node while the organization has not enabled the shell executor.
+/// node while the organization may not use shell (see `shell_allowed`).
 fn publish_diagnostics(
     graph: &GraphSnapshot,
     definitions: &Definitions,

@@ -47,6 +47,7 @@ services:
       CORQTY_BIND_ADDRESS: 0.0.0.0:8080
       CORQTY_PUBLIC_WEB_URL: ${CORQTY_PUBLIC_WEB_URL:-http://localhost:3000}
       CORQTY_SECURE_COOKIES: ${CORQTY_SECURE_COOKIES:-false}
+      CORQTY_SHELL_EXECUTOR: ${CORQTY_SHELL_EXECUTOR:-disabled}
       RUST_LOG: ${RUST_LOG:-corqty_api=info,tower_http=info}
     ports:
       - "${CORQTY_API_PORT:-8080}:8080"
@@ -74,6 +75,7 @@ services:
     environment:
       DATABASE_URL_WORKER: ${DATABASE_URL_WORKER:-postgres://corqty_worker:corqty_worker_dev@postgres:5432/corqty}
       CORQTY_WORKER_CAPACITY: ${CORQTY_WORKER_CAPACITY:-4}
+      CORQTY_SHELL_EXECUTOR: ${CORQTY_SHELL_EXECUTOR:-disabled}
     depends_on:
       migrate:
         condition: service_completed_successfully

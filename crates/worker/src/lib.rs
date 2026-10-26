@@ -20,6 +20,7 @@ use corqty_plugin_sdk::{
 };
 use serde_json::{Map, Value};
 use sqlx::PgPool;
+use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::{Instant, interval_at, sleep_until, timeout};
@@ -182,7 +183,7 @@ enum Ended {
 
 impl Worker {
     /// Starts a claimed attempt, runs it and reports its logs and outcome, unless the lease
-    /// is gone or the worker shuts down first.
+    /// is gone or the worker shuts down first. Its scratch directory is removed last.
     async fn attempt(self: Arc<Self>, claimed: ClaimedJob) {
         let lease = (claimed.node_run_id, claimed.lease_token);
         let job = match retrying(|| self.db.start(lease.0, lease.1)).await {
@@ -200,24 +201,39 @@ impl Worker {
             pending: Vec::new(),
             taken: 0,
         };
+        let mut scratch = None;
         let outcome = if job.cancel_requested {
             Some(Outcome::Canceled)
         } else {
-            self.execute(&claimed.executor, &job, &mut logs).await
+            self.execute(&claimed.executor, &job, &mut logs, &mut scratch)
+                .await
         };
-        let Some(outcome) = outcome else { return };
         // The logs go first: completing ends the lease that appending needs.
-        if !logs.flush().await {
-            return;
-        }
-        if let Err(error) = retrying(|| self.db.complete(lease.0, lease.1, &outcome)).await {
+        if let Some(outcome) = outcome
+            && logs.flush().await
+            && let Err(error) = retrying(|| self.db.complete(lease.0, lease.1, &outcome)).await
+        {
             tracing::warn!(error = %error, "completing a node run failed");
+        }
+        // The outcome is reported, or never will be, so nothing needs the directory now.
+        // Removing it before the report, while no heartbeat renews the lease, could outlast
+        // the lease and lose the outcome.
+        if let Some(scratch) = scratch
+            && let Ok(Err(error)) = tokio::task::spawn_blocking(move || scratch.close()).await
+        {
+            tracing::warn!(error = %error, "removing a scratch directory failed");
         }
     }
 
-    /// Resolves the inputs and runs the executor in a new scratch directory. None when the
-    /// outcome must not be reported.
-    async fn execute(&self, executor: &str, job: &Job, logs: &mut Logs<'_>) -> Option<Outcome> {
+    /// Resolves the inputs and runs the executor in a new scratch directory, which it leaves
+    /// in `scratch` for the caller to remove. None when the outcome must not be reported.
+    async fn execute(
+        &self,
+        executor: &str,
+        job: &Job,
+        logs: &mut Logs<'_>,
+        scratch: &mut Option<TempDir>,
+    ) -> Option<Outcome> {
         let found = executor
             .split_once('@')
             .and_then(|(key, version)| self.registry.find(key, version));
@@ -238,11 +254,11 @@ impl Worker {
             Ok(inputs) => inputs,
             Err(NodeFailure { code, message }) => return Some(failed(None, code, &message, false)),
         };
-        let scratch = tempfile::Builder::new()
+        let created = tempfile::Builder::new()
             .prefix("corqty-node-")
             .tempdir_in(&self.config.scratch_root);
-        let scratch = match scratch {
-            Ok(scratch) => scratch,
+        let scratch_dir = match created {
+            Ok(created) => scratch.insert(created).path().to_owned(),
             Err(error) => {
                 let message = format!("The worker could not create a scratch directory: {error}.");
                 return Some(failed(Some(inputs), "scratch_unavailable", &message, true));
@@ -260,19 +276,8 @@ impl Worker {
             deadline: Utc::now() + TimeDelta::seconds(i64::from(job.timeout_seconds)),
         };
         let ended = self
-            .supervise(
-                found.as_ref(),
-                request,
-                scratch.path().to_owned(),
-                limit,
-                logs,
-            )
+            .supervise(found.as_ref(), request, scratch_dir, limit, logs)
             .await;
-        // The executor has returned or been dropped, so nothing uses the directory now.
-        if let Ok(Err(error)) = tokio::task::spawn_blocking(move || scratch.close()).await {
-            tracing::warn!(error = %error, "removing a scratch directory failed");
-        }
-
         Some(match ended {
             Ended::Returned(Ok(output)) => match validate_output(&job.definition, &output) {
                 Ok(()) => Outcome::Succeeded {

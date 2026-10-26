@@ -55,6 +55,7 @@ jobs:
       - name: Start fresh Compose stack
         env:
           CORQTY_WORKER_CAPACITY: "1"
+          CORQTY_SHELL_EXECUTOR: enabled
         run: docker compose --project-name corqty-ci up --build --wait --scale worker=3
       - name: Run Compose smoke test
         shell: pwsh

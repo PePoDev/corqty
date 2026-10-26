@@ -10,7 +10,6 @@ use corqty_domain::{
 use corqty_persistence::{
     catalog,
     models::SessionRecord,
-    organizations,
     runs::{self, CancelError, NewRun, RunRecord, RunSummaryRecord},
     workflows,
 };
@@ -23,6 +22,7 @@ use crate::{
     catalog::{Items, blocking},
     error::ApiError,
     extract::{ApiJson, ApiPath},
+    organizations::settings::shell_allowed,
     state::AppState,
 };
 
@@ -80,7 +80,7 @@ pub async fn start_run(
         .version
         .or(workflow.published_version)
         .ok_or(ApiError::Conflict("workflow_not_published"))?;
-    let run = create(&mut access, workflow_id, version, input, None).await?;
+    let run = create(&state, &mut access, workflow_id, version, input, None).await?;
     access.commit().await?;
     Ok((StatusCode::CREATED, Json(run)))
 }
@@ -118,6 +118,7 @@ pub async fn rerun(
         .ok_or(ApiError::NotFound)?;
     let version = request.version.unwrap_or(source.summary.version);
     let run = create(
+        &state,
         &mut access,
         source.summary.workflow_id,
         version,
@@ -158,8 +159,9 @@ pub async fn cancel_run(
 
 /// Creates a run of the workflow's `version` from its plan and reads it back. `input` must
 /// match that version's workflow input schema, and a version with shell nodes runs only while
-/// the organization has the shell executor enabled.
+/// the organization may use shell (see `shell_allowed`).
 async fn create(
+    state: &AppState,
     access: &mut OrgAccess,
     workflow_id: Uuid,
     version: i32,
@@ -184,7 +186,7 @@ async fn create(
     let definitions = catalog::definitions_map(&mut access.tx).await?;
     // ponytail: no row lock, so a run that starts while an admin disables shell counts as
     // started just before; disabling never touches existing runs anyway.
-    if !organizations::shell_enabled(&mut access.tx, access.organization_id).await? {
+    if !shell_allowed(state, access).await? {
         let diagnostics = shell_diagnostics(&version.graph, &definitions);
         if !diagnostics.is_empty() {
             return Err(ApiError::Invalid {

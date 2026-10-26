@@ -534,8 +534,13 @@ if ($streamRun.lastEventSeq -ne $last.seq -or [int]$replayed.StatusCode -ne 204)
 }
 $client.Dispose()
 
-# An admin opts into the trusted shell executor. The shell node reads its resolved inputs
-# from CORQTY_INPUT and writes JSON to CORQTY_OUTPUT with jq from the worker image.
+# An admin opts into the trusted shell executor, which the deployment must offer
+# (CORQTY_SHELL_EXECUTOR=enabled). The shell node reads its resolved inputs from
+# CORQTY_INPUT and writes JSON to CORQTY_OUTPUT with jq from the worker image.
+$settings = Invoke-SmokeRequest -User $admin -Method Get -Path "$organizationPath/settings"
+if ($settings.Status -ne 200 -or $settings.Body.shellAvailable -ne $true) {
+    throw "The shell executor is unavailable: start the stack with CORQTY_SHELL_EXECUTOR=enabled"
+}
 $shellEnabled = Invoke-SmokeRequest `
     -User $admin `
     -Method Put `

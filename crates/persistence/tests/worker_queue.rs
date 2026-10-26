@@ -315,6 +315,13 @@ fn with_field(mut event: Value, key: &str, value: Value) -> Value {
     event
 }
 
+/// The event of a first attempt that succeeded with `output`. It carries the attempt's input,
+/// the empty object that `succeeded` reports.
+fn success(node_id: &str, seq: i64, output: Value) -> Value {
+    let event = with_field(node_state(node_id, "succeeded", 1, seq), "input", json!({}));
+    with_field(event, "output", output)
+}
+
 /// Starts the claimed attempt and completes it with `outcome`.
 async fn execute(worker: &WorkerDb, job: &ClaimedJob, outcome: Outcome) {
     let (id, token) = (job.node_run_id, job.lease_token);
@@ -526,24 +533,12 @@ async fn a_child_waits_once_for_each_distinct_parent_and_the_run_succeeds() {
             run_state("queued", 1),
             run_state("running", 2),
             node_state("split", "running", 1, 3),
-            with_field(
-                node_state("split", "succeeded", 1, 4),
-                "output",
-                output("split")
-            ),
+            success("split", 4, output("split")),
             node_state("other", "running", 1, 5),
-            with_field(
-                node_state("other", "succeeded", 1, 6),
-                "output",
-                output("other")
-            ),
+            success("other", 6, output("other")),
             node_state("join", "queued", 0, 7),
             node_state("join", "running", 1, 8),
-            with_field(
-                node_state("join", "succeeded", 1, 9),
-                "output",
-                output("join")
-            ),
+            success("join", 9, output("join")),
             run_state("succeeded", 10),
         ]
     );
@@ -627,11 +622,7 @@ async fn a_failure_skips_only_its_descendants_and_fails_the_run() {
             with_field(node_state("a", "failed", 1, 2), "error", error),
             node_state("b", "skipped", 0, 3),
             node_state("c", "skipped", 0, 4),
-            with_field(
-                node_state("u", "succeeded", 1, 5),
-                "output",
-                json!({"result": "u"})
-            ),
+            success("u", 5, json!({"result": "u"})),
             run_state("failed", 6),
         ]
     );

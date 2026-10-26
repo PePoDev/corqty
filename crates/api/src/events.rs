@@ -3,7 +3,12 @@
 //! `corqty_run_events` notifications into wake-ups, and a wake-up for a run makes that run's
 //! streams read again. The database stays the only source of the events.
 
-use std::{collections::VecDeque, convert::Infallible, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    convert::Infallible,
+    sync::{Arc, Mutex, PoisonError},
+    time::Duration,
+};
 
 use axum::{
     Extension,
@@ -21,7 +26,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use sqlx::postgres::PgListener;
 use tokio::{
-    sync::broadcast::{self, error::RecvError},
+    sync::{
+        OwnedSemaphorePermit,
+        broadcast::{self, error::RecvError},
+    },
     task::JoinHandle,
     time::Instant,
 };
@@ -44,6 +52,11 @@ const SAFETY_READ: Duration = Duration::from_secs(30);
 const MAX_STREAM: Duration = Duration::from_secs(600);
 const MIN_BACKOFF: Duration = Duration::from_millis(250);
 const MAX_BACKOFF: Duration = Duration::from_secs(10);
+/// How many streams one API process keeps open, and how many of them one user may have. Every
+/// open stream reads the database when its run changes, so the streams must not be able to
+/// take every pooled connection.
+pub const MAX_STREAMS: usize = 256;
+const MAX_STREAMS_PER_USER: usize = 8;
 
 /// What the listener tells the open streams.
 #[derive(Clone, Copy, Debug)]
@@ -62,7 +75,8 @@ pub struct EventsQuery {
 /// Streams the run's events after the cursor: the `Last-Event-ID` header that the browser
 /// sends when it reconnects, else `?after=`, else 0. Each event is unnamed, with its seq as
 /// the id and its payload as the data. A finished run whose events the client already has
-/// answers 204, which stops the browser from reconnecting.
+/// answers 204, which stops the browser from reconnecting. A stream past the process's or the
+/// user's limit answers 429.
 pub async fn stream_events(
     State(state): State<AppState>,
     Extension(session): Extension<SessionRecord>,
@@ -90,6 +104,8 @@ pub async fn stream_events(
     if is_finished(&run.summary.status) && cursor >= run.last_event_seq {
         return Ok(StatusCode::NO_CONTENT.into_response());
     }
+    let slot =
+        Slot::take(&state, session.user_id).ok_or(ApiError::TooManyRequests("too_many_streams"))?;
     // Subscribed before the first read, so an event committed after that read wakes the
     // stream.
     let follower = Follower {
@@ -103,6 +119,7 @@ pub async fn stream_events(
         stale: true,
         read_again_at: Instant::now(),
         finished: false,
+        _slot: slot,
     };
     // axum's graceful shutdown waits for open responses, so every stream ends on the token.
     let shutdown = state.shutdown.clone();
@@ -187,6 +204,48 @@ async fn listen(database_url: &str) -> Result<PgListener, sqlx::Error> {
     Ok(listener)
 }
 
+/// An open stream's place among the streams that the process and its user may have open,
+/// given back when the stream ends.
+struct Slot {
+    _permit: OwnedSemaphorePermit,
+    per_user: Arc<Mutex<HashMap<Uuid, usize>>>,
+    user_id: Uuid,
+}
+
+impl Slot {
+    /// A slot for another stream of the user, or None when the process or the user has as many
+    /// open as it may.
+    fn take(state: &AppState, user_id: Uuid) -> Option<Self> {
+        let permit = Arc::clone(&state.streams).try_acquire_owned().ok()?;
+        let mut per_user = state
+            .streams_per_user
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let open = per_user.entry(user_id).or_default();
+        if *open >= MAX_STREAMS_PER_USER {
+            return None;
+        }
+        *open += 1;
+        Some(Self {
+            _permit: permit,
+            per_user: Arc::clone(&state.streams_per_user),
+            user_id,
+        })
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        let mut per_user = self.per_user.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(open) = per_user.get_mut(&self.user_id) {
+            *open -= 1;
+            if *open == 0 {
+                per_user.remove(&self.user_id);
+            }
+        }
+    }
+}
+
 /// One stream's place in its run's events.
 // ponytail: the session is checked when the stream opens, so a stream outlives a logout by
 // at most MAX_STREAM. Every read still checks the membership, through RLS.
@@ -204,6 +263,8 @@ struct Follower {
     read_again_at: Instant,
     /// Whether the run's terminal `run.state` has been read.
     finished: bool,
+    /// Held while the stream lives.
+    _slot: Slot,
 }
 
 impl Follower {

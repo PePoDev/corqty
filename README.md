@@ -13,9 +13,14 @@ and cancellation, and live run views over server-sent events.
 
 ```powershell
 Copy-Item .env.example .env
+$env:CORQTY_SHELL_EXECUTOR = "enabled"
 docker compose up --build --wait
 ./scripts/smoke-foundation.ps1
 ```
+
+The smoke test runs a shell node, so these commands turn the trusted shell
+executor on for this local stack. Read Workers before you turn it on
+anywhere else.
 
 Open http://localhost:3000 and create the first account and organization.
 The host ports can be changed with `CORQTY_POSTGRES_PORT`,
@@ -29,6 +34,7 @@ Each `worker` container claims node runs from PostgreSQL as the
 port, so they scale freely:
 
 ```powershell
+$env:CORQTY_SHELL_EXECUTOR = "enabled"
 docker compose up --build --wait --scale worker=3
 ./scripts/smoke-foundation.ps1 -ExpectedWorkers 3
 ```
@@ -37,11 +43,18 @@ docker compose up --build --wait --scale worker=3
 seconds. The API retries or fails the node runs of a worker that stops
 renewing its leases, for example after a crash.
 
-The shell executor is for trusted users only and is not a security
-boundary. An organization admin enables it under Settings. Its commands run
+The shell executor is off unless the operator sets
+`CORQTY_SHELL_EXECUTOR=enabled` for the `api` and `worker` services. Only
+then can an organization admin enable it under Settings. Turning it on lets
+every organization admin on the deployment run commands as the shared worker
+user, which can read the worker's database credential and so reach other
+organizations' jobs. Turn it on only for single-tenant or fully trusted
+deployments: the shell executor is not a security boundary. Its commands run
 inside the worker container as the worker's unprivileged user, with `bash`
-and `jq` available. Commands that need other tools need a custom worker
-image built from the `worker` target of `docker/rust/Dockerfile`.
+and `jq` available. A timeout or a cancel signals the command's process
+group, so processes that call `setsid` or daemonise keep running. Commands
+that need other tools need a custom worker image built from the `worker`
+target of `docker/rust/Dockerfile`.
 
 The web service proxies `/api/v1` to the API through a Next.js rewrite. Run
 event streams stay live through it because the API sends

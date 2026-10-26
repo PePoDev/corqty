@@ -5,9 +5,12 @@ use axum::{
     http::{Method, StatusCode},
     response::Response,
 };
-use corqty_persistence::worker_queue::WorkerDb;
+use corqty_api::{config::ApiConfig, router::build_router, state::AppState};
+use corqty_persistence::{store::PgStore, worker_queue::WorkerDb};
+use corqty_test_support::API_URL;
 use serde_json::{Value, json};
 use serial_test::serial;
+use sqlx::PgPool;
 use support::AuthFixture;
 use uuid::Uuid;
 
@@ -90,8 +93,8 @@ async fn admins_turn_the_shell_executor_on_and_off() {
     let viewer = member_of(&admin, "viewer").await;
     let settings = format!("/api/v1/orgs/{}/settings", admin.organization_id);
     let (enabled, disabled) = (
-        json!({ "shellEnabled": true }),
-        json!({ "shellEnabled": false }),
+        json!({ "shellAvailable": true, "shellEnabled": true }),
+        json!({ "shellAvailable": true, "shellEnabled": false }),
     );
     assert_eq!(
         body(viewer.get(&settings).await, StatusCode::OK).await,
@@ -255,4 +258,95 @@ async fn shell_nodes_publish_and_start_only_while_shell_is_enabled() {
         .collect();
     let shell_job = (run_id, "shell@1.0.0".to_owned());
     assert_eq!(claimed, [shell_job.clone(), shell_job]);
+}
+
+#[tokio::test]
+#[serial]
+async fn without_the_operator_switch_no_organization_can_use_shell() {
+    let mut admin = AuthFixture::registered("admin@example.com", "Acme").await;
+    let org = format!("/api/v1/orgs/{}", admin.organization_id);
+
+    // Published while the deployment offered shell and the organization had it enabled.
+    set_shell(&admin, true).await;
+    let preset = node(
+        "preset",
+        "corqty.shell.command",
+        json!({ "command": "true", "env": {} }),
+    );
+    let graph = json!({
+        "schemaVersion": 1,
+        "workflowInputSchema": { "type": "object" },
+        "nodes": [preset],
+        "edges": [],
+        "viewport": { "x": 0, "y": 0, "zoom": 1 },
+    });
+    let workflow = body(
+        admin
+            .post_json(&format!("{org}/workflows"), r#"{"name":"Script"}"#)
+            .await,
+        StatusCode::CREATED,
+    )
+    .await;
+    let workflow = format!("{org}/workflows/{}", workflow["id"].as_str().unwrap());
+    let draft = format!("{workflow}/draft");
+    let saved = json!({ "revision": 1, "graph": graph }).to_string();
+    let saved = admin.request_json(Method::PUT, &draft, &saved).await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    let publish = format!("{workflow}/publish");
+    let published = admin.post_json(&publish, r#"{"revision":2}"#).await;
+    assert_eq!(published.status(), StatusCode::CREATED);
+
+    // The API restarts without CORQTY_SHELL_EXECUTOR=enabled.
+    let config = ApiConfig {
+        shell_executor_available: false,
+        ..ApiConfig::for_tests()
+    };
+    let pool = PgPool::connect(API_URL).await.unwrap();
+    admin.app = build_router(AppState::new(PgStore::new(pool), config));
+    let settings = format!("{org}/settings");
+    assert_eq!(
+        body(admin.get(&settings).await, StatusCode::OK).await,
+        json!({ "shellAvailable": false, "shellEnabled": true })
+    );
+
+    // Shell nodes count as disabled, so they neither publish nor start.
+    let shell_node = json!([
+        { "code": "executor_disabled", "pointer": "/nodes/0/definition", "message": SHELL_DISABLED },
+    ]);
+    let saved = json!({ "revision": 2, "graph": graph }).to_string();
+    let saved = admin.request_json(Method::PUT, &draft, &saved).await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    let refused = body(
+        admin.post_json(&publish, r#"{"revision":3}"#).await,
+        StatusCode::UNPROCESSABLE_ENTITY,
+    )
+    .await;
+    assert_eq!(
+        (&refused["code"], &refused["diagnostics"]),
+        (&json!("graph_invalid"), &shell_node)
+    );
+    let refused = body(
+        admin.post_json(&format!("{workflow}/runs"), "{}").await,
+        StatusCode::UNPROCESSABLE_ENTITY,
+    )
+    .await;
+    assert_eq!(
+        (&refused["code"], &refused["diagnostics"]),
+        (&json!("executor_disabled"), &shell_node)
+    );
+
+    // No admin can turn shell on, but turning it off still works.
+    let shell = format!("{settings}/shell");
+    let refused = body(
+        admin
+            .request_json(Method::PUT, &shell, r#"{"enabled":true}"#)
+            .await,
+        StatusCode::CONFLICT,
+    )
+    .await;
+    assert_eq!(refused["code"], "shell_unavailable");
+    assert_eq!(
+        set_shell(&admin, false).await,
+        json!({ "shellAvailable": false, "shellEnabled": false })
+    );
 }

@@ -32,7 +32,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .filter(|capacity| *capacity >= 1)
             .ok_or("CORQTY_WORKER_CAPACITY must be a whole number of at least 1")?;
     }
-    let executors: Vec<Arc<dyn Executor>> = vec![Arc::new(MockExecutor), Arc::new(ShellExecutor)];
+    let mut executors: Vec<Arc<dyn Executor>> = vec![Arc::new(MockExecutor)];
+    // Shell commands run as this process's user, which holds the worker's database credential,
+    // so only the operator can offer them.
+    if std::env::var("CORQTY_SHELL_EXECUTOR").is_ok_and(|value| value == "enabled") {
+        executors.push(Arc::new(ShellExecutor));
+    } else {
+        tracing::info!("the shell executor is off: CORQTY_SHELL_EXECUTOR is not \"enabled\"");
+    }
     let registry = Registry::new(executors)?;
     // One connection for each running attempt, and one to claim with.
     let pool = PgPoolOptions::new()
