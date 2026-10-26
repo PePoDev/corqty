@@ -12,7 +12,7 @@ use crate::{
     auth::{handlers, middleware as auth_middleware},
     catalog,
     error::ApiError,
-    organizations,
+    organizations, runs,
     state::AppState,
     workflows,
 };
@@ -79,6 +79,19 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/orgs/{organization_id}/workflows/{workflow_id}/versions/{version}",
             get(workflows::get_version),
+        )
+        .route(
+            "/orgs/{organization_id}/workflows/{workflow_id}/runs",
+            get(runs::list_runs).post(runs::start_run),
+        )
+        .route("/orgs/{organization_id}/runs/{run_id}", get(runs::get_run))
+        .route(
+            "/orgs/{organization_id}/runs/{run_id}/cancel",
+            post(runs::cancel_run),
+        )
+        .route(
+            "/orgs/{organization_id}/runs/{run_id}/rerun",
+            post(runs::rerun),
         )
         .route(
             "/auth/password",

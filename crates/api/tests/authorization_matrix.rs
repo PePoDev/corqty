@@ -244,6 +244,65 @@ async fn workflow_routes_enforce_capabilities() {
 
 #[tokio::test]
 #[serial]
+async fn run_routes_enforce_capabilities() {
+    let matrix = Matrix::new().await;
+    let org = format!("/api/v1/orgs/{}", matrix.organization_id);
+    let (_, admin) = &matrix.members[0];
+    let request = serde_json::json!({
+        "name": "Matrix",
+        "blueprintId": "00000000-0000-7000-8000-000000000101",
+    });
+    let created = admin
+        .post_json(&format!("{org}/workflows"), &request.to_string())
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let body = to_bytes(created.into_body(), 64 * 1024).await.unwrap();
+    let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let workflow = format!("{org}/workflows/{}", created["id"].as_str().unwrap());
+    let published = admin
+        .post_json(&format!("{workflow}/publish"), r#"{"revision":1}"#)
+        .await;
+    assert_eq!(published.status(), StatusCode::CREATED);
+    // Start a run, so every role has a run to read.
+    let input = r#"{"input":{"region":"eu-west-1"}}"#;
+    let started = admin.post_json(&format!("{workflow}/runs"), input).await;
+    assert_eq!(started.status(), StatusCode::CREATED);
+    let body = to_bytes(started.into_body(), 1024 * 1024).await.unwrap();
+    let started: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let run = format!("{org}/runs/{}", started["id"].as_str().unwrap());
+    for (method, path, body, capability) in [
+        (
+            Method::GET,
+            format!("{workflow}/runs"),
+            "",
+            Capability::ViewOrganization,
+        ),
+        (
+            Method::POST,
+            format!("{workflow}/runs"),
+            input,
+            Capability::RunWorkflows,
+        ),
+        (Method::GET, run.clone(), "", Capability::ViewOrganization),
+        (
+            Method::POST,
+            format!("{run}/rerun"),
+            "{}",
+            Capability::RunWorkflows,
+        ),
+        (
+            Method::POST,
+            format!("{run}/cancel"),
+            "",
+            Capability::RunWorkflows,
+        ),
+    ] {
+        matrix.assert_row(method, &path, body, capability).await;
+    }
+}
+
+#[tokio::test]
+#[serial]
 async fn org_access_commit_reports_the_deferred_final_admin_check_as_conflict() {
     let database = TestDatabase::reset().await;
     let user_id = Uuid::new_v4();

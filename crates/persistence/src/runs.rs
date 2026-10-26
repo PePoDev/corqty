@@ -66,6 +66,9 @@ pub struct NodeRunRecord {
     pub attempt: i32,
     pub max_attempts: i32,
     pub executor: String,
+    /// `waiting_for_compatible_worker` while the node waits for a worker and no live worker
+    /// runs its executor. Derived on read, never stored.
+    pub queue_reason: Option<String>,
     pub input: Option<Value>,
     pub output: Option<Value>,
     pub error: Option<Value>,
@@ -164,6 +167,8 @@ pub async fn list_runs(
 
 /// Reads the run before its nodes, never the other way round: the node states are then at
 /// least as new as `last_event_seq`, so a client that applies the later events stays current.
+/// A queued or retrying node whose executor no worker has advertised within the last minute
+/// gets a queue reason.
 pub async fn get_run(
     conn: &mut PgConnection,
     run_id: Uuid,
@@ -182,11 +187,15 @@ pub async fn get_run(
         return Ok(None);
     };
     run.nodes = sqlx::query_as(
-        "SELECT node_id, state, attempt, max_attempts, executor, input, output, error,
-                started_at, finished_at
-         FROM node_runs
-         WHERE run_id = $1
-         ORDER BY id",
+        "SELECT n.node_id, n.state, n.attempt, n.max_attempts, n.executor,
+                CASE WHEN n.state IN ('queued', 'retry_wait')
+                          AND NOT n.executor = ANY (live.executors)
+                     THEN 'waiting_for_compatible_worker'
+                END AS queue_reason,
+                n.input, n.output, n.error, n.started_at, n.finished_at
+         FROM node_runs n, corqty.live_executors() AS live(executors)
+         WHERE n.run_id = $1
+         ORDER BY n.id",
     )
     .bind(run_id)
     .fetch_all(conn)

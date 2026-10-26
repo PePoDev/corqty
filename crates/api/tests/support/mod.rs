@@ -9,6 +9,7 @@ use axum::{
 use corqty_api::{config::ApiConfig, router::build_router, state::AppState};
 use corqty_persistence::store::PgStore;
 use corqty_test_support::TestDatabase;
+use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -17,6 +18,9 @@ pub struct AuthFixture {
     pub csrf: String,
     pub user_id: Uuid,
     pub organization_id: Uuid,
+    /// The test database's owner and worker pools, for what the API itself cannot do.
+    pub owner: PgPool,
+    pub worker: PgPool,
     cookies: String,
 }
 
@@ -27,11 +31,25 @@ impl AuthFixture {
             PgStore::new(database.api),
             ApiConfig::for_tests(),
         ));
-        Self::register_on(app, email, organization_name).await
+        Self::register_on(
+            app,
+            database.owner,
+            database.worker,
+            email,
+            organization_name,
+        )
+        .await
     }
 
     pub async fn register_another(&self, email: &str, organization_name: &str) -> Self {
-        Self::register_on(self.app.clone(), email, organization_name).await
+        Self::register_on(
+            self.app.clone(),
+            self.owner.clone(),
+            self.worker.clone(),
+            email,
+            organization_name,
+        )
+        .await
     }
 
     pub async fn login(&self, email: &str, password: &str) -> Self {
@@ -53,10 +71,22 @@ impl AuthFixture {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        Self::from_auth_response(self.app.clone(), response).await
+        Self::from_auth_response(
+            self.app.clone(),
+            self.owner.clone(),
+            self.worker.clone(),
+            response,
+        )
+        .await
     }
 
-    async fn register_on(app: Router, email: &str, organization_name: &str) -> Self {
+    async fn register_on(
+        app: Router,
+        owner: PgPool,
+        worker: PgPool,
+        email: &str,
+        organization_name: &str,
+    ) -> Self {
         let response = app
             .clone()
             .oneshot(
@@ -75,10 +105,15 @@ impl AuthFixture {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
-        Self::from_auth_response(app, response).await
+        Self::from_auth_response(app, owner, worker, response).await
     }
 
-    async fn from_auth_response(app: Router, response: Response) -> Self {
+    async fn from_auth_response(
+        app: Router,
+        owner: PgPool,
+        worker: PgPool,
+        response: Response,
+    ) -> Self {
         let cookie_pairs: Vec<String> = response
             .headers()
             .get_all(header::SET_COOKIE)
@@ -123,6 +158,8 @@ impl AuthFixture {
                 .unwrap()
                 .parse()
                 .unwrap(),
+            owner,
+            worker,
             cookies,
         }
     }
@@ -137,6 +174,21 @@ impl AuthFixture {
             .oneshot(
                 Request::get(path)
                     .header(header::COOKIE, &self.cookies)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    /// A POST without a body or a content type, the way the web app cancels a run.
+    pub async fn post(&self, path: &str) -> Response {
+        self.app
+            .clone()
+            .oneshot(
+                Request::post(path)
+                    .header(header::COOKIE, &self.cookies)
+                    .header("x-csrf-token", &self.csrf)
                     .body(Body::empty())
                     .unwrap(),
             )

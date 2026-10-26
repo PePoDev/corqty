@@ -339,12 +339,14 @@ async fn runners_create_runs_from_the_plan_and_viewers_cannot() {
         ),
         (first.id, "Provision", &input, 1, &version.graph)
     );
-    // Every field is present, with null for a missing value.
+    // Every field is present, with null for a missing value. No worker runs mock@1.0.0, so
+    // the queued node waits for one.
     let node = |node_id: &str, state: &str| {
+        let queue_reason = (state == "queued").then_some("waiting_for_compatible_worker");
         json!({
             "nodeId": node_id, "state": state, "attempt": 0, "maxAttempts": 1,
-            "executor": "mock@1.0.0", "input": null, "output": null, "error": null,
-            "startedAt": null, "finishedAt": null
+            "executor": "mock@1.0.0", "queueReason": queue_reason, "input": null,
+            "output": null, "error": null, "startedAt": null, "finishedAt": null
         })
     };
     assert_eq!(
