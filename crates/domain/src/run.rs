@@ -129,8 +129,9 @@ pub fn is_retryable(code: &str, executor_says: bool) -> bool {
     executor_says && !NON_RETRYABLE.contains(&code)
 }
 
-/// The `node_runs` row a node starts a run with.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The `node_runs` row a node starts a run with. It serializes with the column names, so a
+/// whole plan can be inserted from one JSON array.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PlannedNode {
     pub node_id: String,
     /// The definition's executor as `"<key>@<version>"`, the form workers advertise.

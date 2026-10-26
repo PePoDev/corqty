@@ -7,6 +7,7 @@ pub mod members;
 pub mod migrate;
 pub mod models;
 pub mod organizations;
+pub mod runs;
 pub mod store;
 pub mod tenant;
 pub mod workflows;
