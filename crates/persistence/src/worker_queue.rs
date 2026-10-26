@@ -192,3 +192,12 @@ impl WorkerDb {
             .await
     }
 }
+
+/// Recovers the node runs whose worker stopped renewing the lease, on the API's pool, and
+/// returns how many it recovered. Each counts as a retryable `lease_expired` failure of its
+/// attempt. 0 also when another API replica is recovering at the same time.
+pub async fn recover_expired_leases(pool: &PgPool) -> Result<i32, sqlx::Error> {
+    sqlx::query_scalar("SELECT corqty.recover_expired_leases()")
+        .fetch_one(pool)
+        .await
+}

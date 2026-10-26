@@ -10,13 +10,15 @@ use corqty_persistence::{
     catalog,
     runs::{self, NewRun},
     tenant::begin_tenant,
-    worker_queue::{ClaimedJob, Job, LeaseStatus, NodeError, Outcome, WorkerDb},
+    worker_queue::{
+        ClaimedJob, Job, LeaseStatus, NodeError, Outcome, WorkerDb, recover_expired_leases,
+    },
     workflows,
 };
-use corqty_test_support::TestDatabase;
+use corqty_test_support::{API_URL, TestDatabase};
 use serde_json::{Map, Value, json};
 use serial_test::serial;
-use sqlx::{Postgres, Transaction};
+use sqlx::{Postgres, Transaction, postgres::PgPoolOptions};
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
@@ -960,4 +962,231 @@ async fn each_job_carries_the_definition_of_its_own_organization() {
         };
         assert_eq!(job.unwrap(), Some(expected));
     }
+}
+
+/// Ends a claimed lease a second ago, as if its worker had stopped renewing it.
+async fn expire(fixture: &Fixture, job: &ClaimedJob) {
+    sqlx::query(
+        "UPDATE node_runs SET lease_expires_at = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(job.node_run_id)
+    .execute(&fixture.database.owner)
+    .await
+    .unwrap();
+}
+
+/// The error that recovery records for an expired lease.
+fn lease_expired() -> Value {
+    json!({
+        "code": "lease_expired",
+        "message": "The worker stopped renewing its lease.",
+        "retryable": true
+    })
+}
+
+#[tokio::test]
+#[serial]
+async fn an_expired_lease_waits_for_a_retry_and_fences_out_its_worker() {
+    let fixture = Fixture::new().await;
+    let graph = graph(&[task("lost", 2), task("kept", 1)], &[]);
+    let published = fixture.publish(fixture.a, &graph).await;
+    let run_id = fixture.run(&published, &published.plan).await;
+    let worker = fixture.worker(&["mock@1.0.0"]).await;
+    let roots = fixture.claim(&worker).await;
+    let (lost, kept) = (&roots["lost"], &roots["kept"]);
+    // lost's worker stopped renewing its lease; kept's lease still runs.
+    expire(&fixture, lost).await;
+    let (api, owner) = (&fixture.database.api, &fixture.database.owner);
+
+    assert_eq!(recover_expired_leases(api).await.unwrap(), 1);
+    assert_eq!(recover_expired_leases(api).await.unwrap(), 0);
+
+    // The claim counted the attempt, so it stays 1. The retry waits 2 s plus up to 20%
+    // jitter, as after any retryable failure, and a new token ends the old lease.
+    let (state, attempt, token, leased, error, delay): (String, i32, i64, bool, Value, f64) =
+        sqlx::query_as(
+            "SELECT n.state, n.attempt, n.lease_token,
+                    n.leased_by IS NOT NULL OR n.lease_expires_at IS NOT NULL, n.error,
+                    extract(epoch FROM n.available_at - e.created_at)::float8
+             FROM node_runs n
+             JOIN run_events e ON e.run_id = n.run_id AND e.payload ->> 'state' = 'retry_wait'
+             WHERE n.id = $1",
+        )
+        .bind(lost.node_run_id)
+        .fetch_one(owner)
+        .await
+        .unwrap();
+    assert_eq!(
+        (state.as_str(), attempt, token, leased, &error),
+        ("retry_wait", 1, 2, false, &lease_expired())
+    );
+    assert!((2.0..2.4).contains(&delay), "{delay}");
+    let kept_lease: (String, Option<Uuid>, i64) =
+        sqlx::query_as("SELECT state, leased_by, lease_token FROM node_runs WHERE id = $1")
+            .bind(kept.node_run_id)
+            .fetch_one(owner)
+            .await
+            .unwrap();
+    assert_eq!(
+        kept_lease,
+        ("running".to_owned(), Some(worker.worker_id()), 1)
+    );
+    assert_eq!(
+        fixture.events(run_id).await,
+        [
+            run_state("queued", 1),
+            with_field(
+                node_state("lost", "retry_wait", 1, 2),
+                "error",
+                lease_expired()
+            ),
+        ]
+    );
+
+    // The old lease can no longer start, renew, log or complete the attempt.
+    let before = fixture.snapshot().await;
+    let calls = fenced_calls(&worker, lost.node_run_id, lost.lease_token).await;
+    assert_eq!(calls, (false, false, false, false));
+    assert_eq!(fixture.snapshot().await, before);
+
+    // Once due, the retry is claimed as attempt 2.
+    sqlx::query("UPDATE node_runs SET available_at = now() WHERE id = $1")
+        .bind(lost.node_run_id)
+        .execute(owner)
+        .await
+        .unwrap();
+    let retry = fixture.claim(&worker).await.remove("lost").unwrap();
+    assert_eq!((retry.attempt, retry.lease_token), (2, 3));
+}
+
+#[tokio::test]
+#[serial]
+async fn an_expired_lease_without_attempts_left_fails_the_node_and_the_run() {
+    let fixture = Fixture::new().await;
+    let published = fixture
+        .publish(fixture.a, &fixture.infrastructure().await)
+        .await;
+    let run_id = fixture.run(&published, &published.plan).await;
+    let worker = fixture.worker(&["mock@1.0.0"]).await;
+    let vpc = fixture.claim(&worker).await.remove("vpc").unwrap();
+    let job = worker.start(vpc.node_run_id, vpc.lease_token).await;
+    assert!(job.unwrap().is_some());
+    expire(&fixture, &vpc).await;
+
+    let api = &fixture.database.api;
+    assert_eq!(recover_expired_leases(api).await.unwrap(), 1);
+
+    // vpc had its only attempt: it fails, its descendants are skipped, and the run ends.
+    assert_eq!(
+        fixture.events(run_id).await,
+        [
+            run_state("queued", 1),
+            run_state("running", 2),
+            node_state("vpc", "running", 1, 3),
+            with_field(node_state("vpc", "failed", 1, 4), "error", lease_expired()),
+            node_state("rds", "skipped", 0, 5),
+            node_state("deploy", "skipped", 0, 6),
+            run_state("failed", 7),
+        ]
+    );
+    let run: (String, bool) =
+        sqlx::query_as("SELECT status, finished_at IS NOT NULL FROM runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&fixture.database.owner)
+            .await
+            .unwrap();
+    assert_eq!(run, ("failed".to_owned(), true));
+}
+
+#[tokio::test]
+#[serial]
+async fn an_expired_lease_of_a_run_asked_to_cancel_cancels_the_node() {
+    let fixture = Fixture::new().await;
+    let graph = graph(
+        &[task("long", 3), task("after", 1)],
+        &[edge("long", "after", "input")],
+    );
+    let published = fixture.publish(fixture.a, &graph).await;
+    let run_id = fixture.run(&published, &published.plan).await;
+    let worker = fixture.worker(&["mock@1.0.0"]).await;
+    let long = fixture.claim(&worker).await.remove("long").unwrap();
+    let tenant = fixture.a;
+    let mut tx = fixture.tx(tenant).await;
+    runs::cancel_run(&mut tx, tenant.organization_id, tenant.admin, run_id)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    expire(&fixture, &long).await;
+
+    let api = &fixture.database.api;
+    assert_eq!(recover_expired_leases(api).await.unwrap(), 1);
+
+    // Two attempts are left, but a run that was asked to cancel is not retried.
+    assert_eq!(
+        fixture.events(run_id).await,
+        [
+            run_state("queued", 1),
+            node_state("after", "canceled", 0, 2),
+            with_field(
+                node_state("long", "canceled", 1, 3),
+                "error",
+                lease_expired()
+            ),
+            run_state("canceled", 4),
+        ]
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn one_recovery_pass_at_a_time_recovers_each_expired_lease_once() {
+    let fixture = Fixture::new().await;
+    let published = fixture
+        .publish(fixture.a, &graph(&[task("task", 2)], &[]))
+        .await;
+    for _ in 0..20 {
+        fixture.run(&published, &published.plan).await;
+    }
+    let worker = fixture.worker(&["mock@1.0.0"]).await;
+    assert_eq!(worker.claim(100, 30).await.unwrap().len(), 20);
+    let owner = &fixture.database.owner;
+    sqlx::query("UPDATE node_runs SET lease_expires_at = now() - interval '1 second'")
+        .execute(owner)
+        .await
+        .unwrap();
+
+    // While another API replica holds the recovery lock, a pass recovers nothing.
+    let before = fixture.snapshot().await;
+    let mut leader = owner.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(7243, 1)")
+        .execute(&mut *leader)
+        .await
+        .unwrap();
+    let api = &fixture.database.api;
+    assert_eq!(recover_expired_leases(api).await.unwrap(), 0);
+    leader.rollback().await.unwrap();
+    assert_eq!(fixture.snapshot().await, before);
+
+    // Four passes at the same time, each on a connection of its own, recover each lease
+    // once: one new token and one event per node run.
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect(API_URL)
+        .await
+        .unwrap();
+    let mut passes = JoinSet::new();
+    for _ in 0..4 {
+        let pool = pool.clone();
+        passes.spawn(async move { recover_expired_leases(&pool).await.unwrap() });
+    }
+    assert_eq!(passes.join_all().await.iter().sum::<i32>(), 20);
+    let recovered: Vec<(String, i32, i64, i64)> = sqlx::query_as(
+        "SELECT n.state, n.attempt, n.lease_token,
+                (SELECT count(*) FROM run_events e WHERE e.run_id = n.run_id)
+         FROM node_runs n",
+    )
+    .fetch_all(owner)
+    .await
+    .unwrap();
+    assert_eq!(recovered, vec![("retry_wait".to_owned(), 1, 2, 2); 20]);
 }

@@ -7,6 +7,7 @@ pub mod catalog;
 pub mod config;
 pub mod error;
 pub mod extract;
+pub mod loops;
 pub mod organizations;
 pub mod router;
 pub mod runs;

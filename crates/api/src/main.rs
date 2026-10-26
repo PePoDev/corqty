@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use corqty_api::{config::ApiConfig, serve, state::AppState};
+use corqty_api::{config::ApiConfig, loops, serve, state::AppState};
 use corqty_persistence::store::PgStore;
 use sqlx::postgres::PgPoolOptions;
 
@@ -19,6 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     let listener = tokio::net::TcpListener::bind(&config.bind_address).await?;
     let state = AppState::new(PgStore::new(pool), config);
+    let background = loops::spawn(&state);
     let shutdown = state.shutdown.clone();
     tokio::spawn(async move {
         shutdown_signal().await;
@@ -26,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         shutdown.cancel();
     });
     serve(listener, state).await?;
+    background.join_all().await;
     Ok(())
 }
 
