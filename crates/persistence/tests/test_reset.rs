@@ -4,7 +4,7 @@ use serial_test::serial;
 /// Rows that `TestDatabase::reset()` puts back after truncating a table.
 fn seeded_rows(table: &str) -> i64 {
     match table {
-        "node_definitions" => 6,
+        "node_definitions" => 7,
         "blueprints" => 2,
         _ => 0,
     }

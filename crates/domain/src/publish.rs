@@ -287,6 +287,32 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
     capped(diagnostics)
 }
 
+/// An `executor_disabled` diagnostic for each node whose definition runs on the trusted shell
+/// executor, which an organization's admin must enable before such a node is published or run.
+/// Nodes with an unknown definition are skipped. Capped at `MAX_DIAGNOSTICS`.
+#[must_use]
+pub fn shell_diagnostics(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<Diagnostic> {
+    let diagnostics = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| {
+            let reference = (node.definition.key.clone(), node.definition.version);
+            definitions
+                .get(&reference)
+                .is_some_and(|spec| spec.executor.key == "shell")
+        })
+        .map(|(index, _)| {
+            Diagnostic::new(
+                "executor_disabled",
+                format!("/nodes/{index}/definition"),
+                "An admin must enable the shell executor before this node can be published or run.",
+            )
+        })
+        .collect();
+    capped(diagnostics)
+}
+
 /// The lowercase hex SHA-256 of the graph as JSON with sorted object keys. The same graph
 /// always gets the same checksum, whatever key order it was submitted with.
 #[must_use]

@@ -11,6 +11,7 @@ import {
   useBlueprints,
   useNodeDefinitions,
   usePublishWorkflow,
+  useSettings,
   useValidateWorkflow,
   useWorkflow,
 } from "@/api/queries"
@@ -25,6 +26,8 @@ import { useCan } from "@/auth/use-can"
 import { StatusBadge } from "@/components/status/status-badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { RunDialog } from "@/runs/run-dialog"
+import { RunsDrawer } from "@/runs/runs-drawer"
 import { mapDiagnostics, type MappedDiagnostic } from "@/studio/diagnostics"
 import { Palette } from "@/studio/palette"
 import { useDraftAutosave, type SavedDraft } from "@/studio/use-draft-autosave"
@@ -83,6 +86,7 @@ function Editor({
 }) {
   const canEdit = useCan(organizationId, "edit_workflows")
   const canPublish = useCan(organizationId, "publish_workflows")
+  const canRun = useCan(organizationId, "run_workflows")
   const wide = useWideScreen()
   const readOnlyReason = !canEdit
     ? "Your role can view this workflow but not edit it."
@@ -97,6 +101,13 @@ function Editor({
   )
   const validate = useValidateWorkflow(organizationId, workflow.id)
   const publish = usePublishWorkflow(organizationId, workflow.id)
+  const settings = useSettings(organizationId)
+  // The shell preset (and any definition on the shell executor) is offered
+  // only while the deployment allows shell and an admin enabled it.
+  const paletteDefinitions =
+    settings.data?.shellAvailable && settings.data.shellEnabled
+      ? definitions
+      : definitions.filter(({ executor }) => executor.key !== "shell")
   const queryClient = useQueryClient()
   const [problems, setProblems] = useState<{
     graph: GraphSnapshot
@@ -206,23 +217,34 @@ function Editor({
           </span>
         )}
         <span aria-live="polite">{notice}</span>
-        {canPublish && (
-          <div className="ml-auto flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy || conflict}
-              onClick={() => void run(validateDraft)}
-            >
-              Validate
-            </Button>
-            <Button
-              size="sm"
-              disabled={busy || conflict}
-              onClick={() => void run(publishDraft)}
-            >
-              Publish
-            </Button>
+        {(canPublish || canRun) && (
+          <div className="ml-auto flex items-center gap-2">
+            {canPublish && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy || conflict}
+                  onClick={() => void run(validateDraft)}
+                >
+                  Validate
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy || conflict}
+                  onClick={() => void run(publishDraft)}
+                >
+                  Publish
+                </Button>
+              </>
+            )}
+            {canRun && (
+              <RunDialog
+                organizationId={organizationId}
+                workflowId={workflow.id}
+                version={workflow.publishedVersion}
+              />
+            )}
           </div>
         )}
       </header>
@@ -268,7 +290,7 @@ function Editor({
         )}
       >
         {!readOnlyReason && (
-          <Palette definitions={definitions} blueprints={blueprints} />
+          <Palette definitions={paletteDefinitions} blueprints={blueprints} />
         )}
         <StudioCanvas
           graph={workflow.draft.graph}
@@ -279,6 +301,7 @@ function Editor({
           onChange={autosave.edit}
         />
       </div>
+      <RunsDrawer organizationId={organizationId} workflowId={workflow.id} />
     </section>
   )
 }

@@ -10,10 +10,14 @@ import type {
   Me,
   Member,
   NodeDefinition,
+  NodeRun,
   PortSpec,
   Role,
+  Run,
+  RunSummary,
   Workflow,
   WorkflowSummary,
+  WorkflowVersion,
 } from "@/api/types"
 
 const capabilities: Record<Role, Capability[]> = {
@@ -118,7 +122,7 @@ function port(
   return { name, dataType, schema, required, description: "" }
 }
 
-// Every seeded definition is version 1 and runs on the mock executor.
+// The seeded mock definitions are version 1 and share the mock config.
 function seeded(
   definition: Pick<
     NodeDefinition,
@@ -150,6 +154,44 @@ function seeded(
 }
 
 const vpcIdSchema: JsonSchema = { type: "string", pattern: "^vpc-" }
+
+// The trusted shell preset: the palette offers it once an admin enables shell.
+export const shellCommand: NodeDefinition = {
+  id: "00000000-0000-7000-8000-000000000007",
+  key: "corqty.shell.command",
+  version: 1,
+  displayName: "Shell command",
+  description:
+    "Trusted: runs a shell command inside the worker container. Not a security boundary.",
+  category: "Shell (trusted)",
+  deprecated: false,
+  inputs: [port("input", "core.any", {})],
+  outputs: [port("result", "core.any", {})],
+  configSchema: {
+    type: "object",
+    properties: {
+      command: {
+        type: "string",
+        minLength: 1,
+        maxLength: 16384,
+        title: "Command",
+      },
+      env: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        title: "Environment",
+      },
+    },
+    required: ["command"],
+    additionalProperties: false,
+  },
+  uiSchema: { command: { widget: "textarea" }, env: { widget: "keyValue" } },
+  defaults: {
+    command: `jq '{result: .}' "$CORQTY_INPUT" > "$CORQTY_OUTPUT"`,
+    env: {},
+  },
+  executor: { key: "shell", version: "1.0.0" },
+}
 
 // The seeded system catalog, in API order (key, then version).
 export const nodeDefinitions: NodeDefinition[] = [
@@ -190,6 +232,7 @@ export const nodeDefinitions: NodeDefinition[] = [
     { result: { ok: true } },
     0,
   ),
+  shellCommand,
   seeded(
     {
       id: "00000000-0000-7000-8000-000000000003",
@@ -329,6 +372,74 @@ export const workflow: Workflow = {
   draft: { revision: 3, graph: blueprints[1].graph },
 }
 
+// Its v1 was published from that draft.
+export const workflowVersion: WorkflowVersion = {
+  version: 1,
+  graph: blueprints[1].graph,
+}
+
+// Newest first, as the API lists them.
+export const runs: RunSummary[] = [
+  {
+    id: "run-2",
+    workflowId: "wf-2",
+    version: 1,
+    status: "running",
+    triggerSource: "manual",
+    createdAt: "2026-10-26T09:00:00Z",
+    startedAt: "2026-10-26T09:00:01Z",
+    finishedAt: null,
+    cancelRequested: false,
+  },
+  {
+    id: "run-1",
+    workflowId: "wf-2",
+    version: 1,
+    status: "succeeded",
+    triggerSource: "manual",
+    createdAt: "2026-10-25T09:00:00Z",
+    startedAt: "2026-10-25T09:00:01Z",
+    finishedAt: "2026-10-25T09:00:04Z",
+    cancelRequested: false,
+  },
+]
+
+function nodeRun(nodeId: string, changes: Partial<NodeRun> = {}): NodeRun {
+  return {
+    nodeId,
+    state: "blocked",
+    attempt: 0,
+    maxAttempts: 1,
+    executor: "mock@1.0.0",
+    queueReason: null,
+    input: null,
+    output: null,
+    error: null,
+    startedAt: null,
+    finishedAt: null,
+    ...changes,
+  }
+}
+
+// run-2 in detail, after its events 1-3: queued, VPC running, run running.
+export const run: Run = {
+  ...runs[0],
+  workflowName: "Provision staging",
+  input: { region: "eu-west-1" },
+  lastEventSeq: 3,
+  graph: workflowVersion.graph,
+  nodes: [
+    nodeRun("vpc", {
+      state: "running",
+      attempt: 1,
+      input: { region: "eu-west-1" },
+      startedAt: "2026-10-26T09:00:01Z",
+    }),
+    nodeRun("rds"),
+    nodeRun("deploy"),
+  ],
+}
+
 // A signed-in admin of org-1 who reads data and saves drafts; tests override
 // other writes and failures.
 export const handlers = [
@@ -338,6 +449,9 @@ export const handlers = [
   ),
   http.get("/api/v1/orgs/:organizationId/audit-events", () =>
     HttpResponse.json({ items: auditEvents }),
+  ),
+  http.get("/api/v1/orgs/:organizationId/settings", () =>
+    HttpResponse.json({ shellAvailable: true, shellEnabled: false }),
   ),
   http.get("/api/v1/orgs/:organizationId/workflows", () =>
     HttpResponse.json({ items: workflows }),
@@ -351,6 +465,16 @@ export const handlers = [
       const { revision } = (await request.json()) as { revision: number }
       return HttpResponse.json({ revision: revision + 1 })
     },
+  ),
+  http.get(
+    "/api/v1/orgs/:organizationId/workflows/:workflowId/versions/:version",
+    () => HttpResponse.json(workflowVersion),
+  ),
+  http.get("/api/v1/orgs/:organizationId/workflows/:workflowId/runs", () =>
+    HttpResponse.json({ items: runs }),
+  ),
+  http.get("/api/v1/orgs/:organizationId/runs/:runId", () =>
+    HttpResponse.json(run),
   ),
   http.get("/api/v1/orgs/:organizationId/node-definitions", () =>
     HttpResponse.json({ items: nodeDefinitions }),

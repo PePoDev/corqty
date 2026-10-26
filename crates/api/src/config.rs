@@ -5,6 +5,9 @@ pub struct ApiConfig {
     pub public_web_url: String,
     pub secure_cookies: bool,
     pub session_days: i64,
+    /// Whether this deployment offers the trusted shell executor at all
+    /// (`CORQTY_SHELL_EXECUTOR=enabled`). Without it no organization can enable shell.
+    pub shell_executor_available: bool,
 }
 
 impl ApiConfig {
@@ -18,6 +21,8 @@ impl ApiConfig {
             secure_cookies: std::env::var("CORQTY_SECURE_COOKIES")
                 .map_or(true, |value| value != "false"),
             session_days: 30,
+            shell_executor_available: std::env::var("CORQTY_SHELL_EXECUTOR")
+                .is_ok_and(|value| value == "enabled"),
         })
     }
 
@@ -29,6 +34,7 @@ impl ApiConfig {
             public_web_url: "http://localhost:3000".to_owned(),
             secure_cookies: false,
             session_days: 30,
+            shell_executor_available: true,
         }
     }
 }

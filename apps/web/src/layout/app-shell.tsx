@@ -16,6 +16,7 @@ const links = [
   { label: "Catalog", suffix: "/catalog" },
   { label: "Members", suffix: "/members" },
   { label: "Audit log", suffix: "/audit" },
+  { label: "Settings", suffix: "/settings" },
 ]
 
 export function AppShell({

@@ -2,7 +2,7 @@ use corqty_domain::{
     catalog::{FILE_TEXT_MAX_BYTES, MAX_PORTS},
     diagnostic::{Diagnostic, MAX_DIAGNOSTICS},
     graph::{GraphSnapshot, MAX_NODES},
-    publish::{Definitions, canonical_checksum, validate_graph},
+    publish::{Definitions, canonical_checksum, shell_diagnostics, validate_graph},
 };
 use serde_json::{Value, json};
 
@@ -385,6 +385,30 @@ fn an_executor_that_is_not_built_in_is_reported_on_the_node() {
     assert_eq!(
         codes(&validate_graph(&with(&[]), &definitions)),
         [("unknown_executor", "/nodes/1/definition")]
+    );
+}
+
+#[test]
+fn nodes_that_run_on_the_shell_executor_are_reported_on_their_definitions() {
+    let mut definitions = definitions();
+    assert!(shell_diagnostics(&with(&[]), &definitions).is_empty());
+
+    let database = definitions.get_mut(&("acme.db".to_owned(), 1)).unwrap();
+    database.executor.key = "shell".to_owned();
+    // Shell is built in, so the publish rules alone accept the graph.
+    assert!(validate_graph(&with(&[]), &definitions).is_empty());
+    // A node whose definition is unknown runs on nothing.
+    let graph = with(&[
+        ("/nodes/2", node("ghost")),
+        ("/nodes/2/definition/key", json!("acme.ghost")),
+    ]);
+    assert_eq!(
+        shell_diagnostics(&graph, &definitions),
+        [Diagnostic::new(
+            "executor_disabled",
+            "/nodes/1/definition",
+            "An admin must enable the shell executor before this node can be published or run.",
+        )]
     );
 }
 

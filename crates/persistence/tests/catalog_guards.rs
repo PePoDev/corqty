@@ -118,3 +118,35 @@ async fn security_violations_report_unguarded_objects() {
         ]
     );
 }
+
+#[tokio::test]
+#[serial]
+async fn the_worker_role_executes_only_the_worker_functions() {
+    let database = TestDatabase::reset().await;
+
+    // Only definer functions run with more rights than the caller's, and the worker role
+    // has no table privileges of its own.
+    let functions: Vec<String> = sqlx::query_scalar(
+        "SELECT p.proname::text
+         FROM pg_proc p
+         WHERE p.pronamespace = 'corqty'::regnamespace
+           AND p.prosecdef
+           AND has_function_privilege('corqty_worker', p.oid, 'EXECUTE')
+         ORDER BY 1",
+    )
+    .fetch_all(&database.owner)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        functions,
+        [
+            "append_node_log",
+            "claim_node_runs",
+            "complete_node_run",
+            "heartbeat",
+            "register_worker",
+            "start_node_run",
+        ]
+    );
+}

@@ -12,6 +12,12 @@ impl PgStore {
         Self { pool }
     }
 
+    /// The pool itself, for work outside a request such as background loops.
+    #[must_use]
+    pub const fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     pub async fn begin_tenant(
         &self,
         user_id: Uuid,

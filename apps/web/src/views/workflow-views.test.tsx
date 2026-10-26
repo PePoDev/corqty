@@ -138,7 +138,7 @@ it("the catalog shows the latest definitions and marks simulated entries", async
   const thing = await within(definitions).findByRole("row", {
     name: /acme\.thing/,
   })
-  expect(within(definitions).getAllByRole("row")).toHaveLength(1 + 7)
+  expect(within(definitions).getAllByRole("row")).toHaveLength(1 + 8)
   expect(within(thing).getByText("Thing")).toBeInTheDocument()
   expect(within(thing).getByText("v2")).toBeInTheDocument()
   expect(within(thing).getByText("v1 deprecated")).toHaveClass(
