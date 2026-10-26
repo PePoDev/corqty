@@ -59,6 +59,30 @@ services:
       timeout: 3s
       retries: 30
 
+  worker:
+    build:
+      context: .
+      dockerfile: docker/rust/Dockerfile
+      target: worker
+    init: true
+    # The shell executor writes only to its scratch directories in /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    # A worker drains its attempts for 25 s and then gives executors 5 s to stop.
+    stop_grace_period: 30s
+    environment:
+      DATABASE_URL_WORKER: ${DATABASE_URL_WORKER:-postgres://corqty_worker:corqty_worker_dev@postgres:5432/corqty}
+      CORQTY_WORKER_CAPACITY: ${CORQTY_WORKER_CAPACITY:-4}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/corqty-worker", "healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+
   web:
     build:
       context: .

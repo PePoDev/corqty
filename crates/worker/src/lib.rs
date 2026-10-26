@@ -4,9 +4,9 @@
 //! under a lease that it keeps renewing, and reports the attempt's logs and outcome. It
 //! reaches the database only through the worker role's `corqty` functions.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use chrono::{TimeDelta, Utc};
 use corqty_domain::run::is_retryable;
@@ -32,6 +32,8 @@ const LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
 const LOG_FLUSH_BYTES: usize = 8 * 1024;
 /// How many log chunks an executor may send before it waits for the worker.
 const LOG_CHANNEL_CAPACITY: usize = 64;
+/// A worker counts as alive while it has claimed this recently.
+const ALIVE_MAX_AGE: Duration = Duration::from_secs(10);
 
 /// How a worker runs. `Default` holds the production values.
 #[derive(Clone, Debug)]
@@ -53,6 +55,9 @@ pub struct WorkerConfig {
     pub cancel_grace: Duration,
     /// Where each attempt gets a scratch directory of its own.
     pub scratch_root: PathBuf,
+    /// Touched after every successful claim, so that a healthcheck can tell the worker still
+    /// reaches the database.
+    pub alive_file: PathBuf,
 }
 
 impl Default for WorkerConfig {
@@ -66,6 +71,7 @@ impl Default for WorkerConfig {
             drain: Duration::from_secs(25),
             cancel_grace: Duration::from_secs(5),
             scratch_root: std::env::temp_dir(),
+            alive_file: std::env::temp_dir().join("corqty-worker.alive"),
         }
     }
 }
@@ -102,6 +108,7 @@ pub async fn run(
         let free = worker.config.capacity - running;
         match retrying(|| worker.db.claim(free, worker.config.lease_seconds)).await {
             Ok(claimed) => {
+                touch(&worker.config.alive_file);
                 for job in claimed {
                     attempts.spawn(Arc::clone(&worker).attempt(job));
                 }
@@ -124,6 +131,34 @@ pub async fn run(
         while attempts.join_next().await.is_some() {}
     }
     Ok(())
+}
+
+/// Checks that a worker touched `alive_file` within the last 10 s, as it does after every
+/// successful claim. The `healthcheck` subcommand runs this.
+pub fn check_alive(alive_file: &Path) -> Result<(), String> {
+    let modified = std::fs::metadata(alive_file)
+        .and_then(|metadata| metadata.modified())
+        .map_err(|error| format!("{}: {error}", alive_file.display()))?;
+    // A file from the future, after the clock went back, counts as fresh.
+    let age = SystemTime::now()
+        .duration_since(modified)
+        .unwrap_or_default();
+    if age > ALIVE_MAX_AGE {
+        return Err(format!(
+            "{} is {} s old",
+            alive_file.display(),
+            age.as_secs()
+        ));
+    }
+    Ok(())
+}
+
+/// Creates the file, or sets its modification time to now.
+fn touch(path: &Path) {
+    let touched = std::fs::File::create(path).and_then(|file| file.set_modified(SystemTime::now()));
+    if let Err(error) = touched {
+        tracing::warn!(error = %error, "touching the alive file failed");
+    }
 }
 
 struct Worker {

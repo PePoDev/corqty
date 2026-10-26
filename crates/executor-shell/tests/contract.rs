@@ -254,9 +254,12 @@ async fn twenty_mebibytes_of_output_stop_at_the_log_cap_without_blocking_the_com
 
     assert_eq!(outcome.expect("the attempt succeeds"), Map::new());
     assert!(chunks.iter().all(|chunk| chunk.text.len() <= 8192));
-    assert_eq!(
-        chunks.iter().map(|chunk| chunk.text.len()).sum::<usize>(),
-        10_485_760
+    // Chunks stop after the one that takes the log past the cap, which goes out whole.
+    let sent: usize = chunks.iter().map(|chunk| chunk.text.len()).sum();
+    let crossing = chunks.last().expect("the command logged").text.len();
+    assert!(
+        sent > 10_485_760 && sent - crossing <= 10_485_760,
+        "{sent} bytes"
     );
 }
 

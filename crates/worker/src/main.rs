@@ -6,12 +6,16 @@ use corqty_executor_mock::MockExecutor;
 use corqty_executor_shell::ShellExecutor;
 use corqty_plugin_host::Registry;
 use corqty_plugin_sdk::Executor;
-use corqty_worker::{WorkerConfig, run};
+use corqty_worker::{WorkerConfig, check_alive, run};
 use sqlx::postgres::PgPoolOptions;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // The Compose healthcheck reads only the alive file that the running worker touches.
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        return Ok(check_alive(&WorkerConfig::default().alive_file)?);
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

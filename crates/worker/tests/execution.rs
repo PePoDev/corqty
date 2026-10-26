@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use corqty_domain::{
     diagnostic::Diagnostic, graph::GraphSnapshot, publish::canonical_checksum, run::plan_run,
@@ -20,7 +20,7 @@ use corqty_plugin_sdk::{
     LogStream,
 };
 use corqty_test_support::TestDatabase;
-use corqty_worker::{WorkerConfig, run};
+use corqty_worker::{WorkerConfig, check_alive, run};
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
 use serial_test::serial;
@@ -317,6 +317,12 @@ where
     timeout(Duration::from_secs(10), polling)
         .await
         .expect("the condition holds within 10 s")
+}
+
+/// Sets the modification time of the file at `path`.
+fn set_modified(path: &Path, time: SystemTime) {
+    let file = std::fs::File::options().write(true).open(path).unwrap();
+    file.set_modified(time).unwrap();
 }
 
 /// `base` with the top-level fields of `changes` replaced.
@@ -894,4 +900,31 @@ async fn a_flood_of_logs_is_cut_at_the_cap_with_one_truncation_event() {
         .filter(|event| event["type"] == "node.log_truncated")
         .count();
     assert_eq!(truncations, 1);
+}
+
+#[tokio::test]
+#[serial]
+async fn every_successful_claim_touches_the_alive_file() {
+    let fixture = Fixture::new().await;
+    let directory = TempDir::new().unwrap();
+    let config = WorkerConfig {
+        alive_file: directory.path().join("corqty-worker.alive"),
+        ..fixture.config(1)
+    };
+    let alive_file = config.alive_file.clone();
+    let path = alive_file.as_path();
+    let worker = fixture.start(config, mock());
+    // A worker with nothing to run still claims every 50 ms, and each claim touches the file.
+    eventually(|| async move { check_alive(path).ok() }).await;
+    let stale = SystemTime::now() - Duration::from_secs(60);
+    set_modified(path, stale);
+    eventually(|| async move { check_alive(path).ok() }).await;
+
+    // Without its database the worker's claims fail, so the file goes stale.
+    fixture.database.worker.close().await;
+    sleep(Duration::from_millis(200)).await;
+    set_modified(path, stale);
+    sleep(Duration::from_millis(500)).await;
+    assert!(check_alive(path).is_err());
+    worker.stop().await;
 }

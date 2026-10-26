@@ -8,8 +8,9 @@ COPY migrations ./migrations
 RUN --mount=type=cache,id=corqty-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=corqty-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=corqty-target,target=/workspace/target,sharing=locked \
-    cargo build --release --locked -p corqty-api -p corqty-migrator \
-    && install -D -m 0755 -t /out target/release/corqty-api target/release/corqty-migrator
+    cargo build --release --locked -p corqty-api -p corqty-migrator -p corqty-worker \
+    && install -D -m 0755 -t /out \
+        target/release/corqty-api target/release/corqty-migrator target/release/corqty-worker
 
 # The runtime glibc must match the builder's (bookworm).
 FROM debian:bookworm-slim AS runtime
@@ -28,3 +29,12 @@ RUN apt-get update \
 COPY --from=builder /out/corqty-api /usr/local/bin/
 USER 10001:10001
 ENTRYPOINT ["corqty-api"]
+
+FROM runtime AS worker
+# The tools that trusted shell commands can call. Other tools need a custom worker image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash jq \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/corqty-worker /usr/local/bin/
+USER 10001:10001
+ENTRYPOINT ["corqty-worker"]

@@ -198,13 +198,13 @@ mod imp {
                 .map(Pid::from_raw),
         );
 
-        let budget = AtomicUsize::new(MAX_LOG_BYTES_PER_NODE_RUN);
+        let sent = AtomicUsize::new(0);
         let stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
         let mut forwarding = pin!(async {
             tokio::join!(
-                forward(stdout, LogStream::Stdout, &budget, &context.logs),
-                forward(stderr, LogStream::Stderr, &budget, &context.logs),
+                forward(stdout, LogStream::Stdout, &sent, &context.logs),
+                forward(stderr, LogStream::Stderr, &sent, &context.logs),
             );
         });
         let mut supervising = pin!(async {
@@ -261,13 +261,13 @@ mod imp {
             && !name.starts_with("CORQTY_")
     }
 
-    /// Sends a pipe to the log channel in chunks of at most 8 KiB while the attempt's log
-    /// budget lasts. Then it keeps reading and drops the rest, so the command never blocks
-    /// on a full pipe.
+    /// Sends a pipe to the log channel in chunks of at most 8 KiB until the attempt has sent
+    /// more than the log cap. Then it keeps reading and drops the rest, so the command never
+    /// blocks on a full pipe.
     async fn forward(
         mut pipe: impl AsyncRead + Unpin,
         stream: LogStream,
-        budget: &AtomicUsize,
+        sent: &AtomicUsize,
         logs: &Sender<LogChunk>,
     ) {
         let mut buffer = vec![0; CHUNK_BYTES];
@@ -280,14 +280,12 @@ mod imp {
                 _ => pending.len(),
             };
             let rest = pending.split_off(complete);
-            let mut text = String::from_utf8_lossy(&pending).into_owned();
+            let text = String::from_utf8_lossy(&pending).into_owned();
             pending = rest;
-            let (Ok(left) | Err(left)) =
-                budget.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
-                    Some(left.saturating_sub(text.len()))
-                });
-            text.truncate(text.floor_char_boundary(left));
-            if !text.is_empty() {
+            // The chunk that takes the log past the cap still goes out whole, so the database
+            // sees the log pass the cap and records the truncation.
+            let before = sent.fetch_add(text.len(), Ordering::Relaxed);
+            if before <= MAX_LOG_BYTES_PER_NODE_RUN && !text.is_empty() {
                 let _ = logs.send(LogChunk { stream, text }).await;
             }
         }

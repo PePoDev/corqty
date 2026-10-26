@@ -7,7 +7,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:18-alpine
@@ -53,10 +53,12 @@ jobs:
       - run: pnpm web:test
       - run: pnpm web:build
       - name: Start fresh Compose stack
-        run: docker compose --project-name corqty-ci up --build --wait
+        env:
+          CORQTY_WORKER_CAPACITY: "1"
+        run: docker compose --project-name corqty-ci up --build --wait --scale worker=3
       - name: Run Compose smoke test
         shell: pwsh
-        run: ./scripts/smoke-foundation.ps1 -ProjectName corqty-ci
+        run: ./scripts/smoke-foundation.ps1 -ProjectName corqty-ci -ExpectedWorkers 3
       - name: Remove Compose stack
         if: always()
         run: docker compose --project-name corqty-ci down --volumes
