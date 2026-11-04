@@ -1,3 +1,5 @@
+// First: msw/sse handlers need a global EventSource when they are created.
+import "@/test/event-source"
 import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, vi } from "vitest"

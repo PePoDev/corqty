@@ -1,7 +1,7 @@
 use std::pin::pin;
 
 use corqty_domain::{
-    catalog::{NewNodeDefinition, validate_new_definition},
+    catalog::{NewNodeDefinition, NodeDefinitionSpec, validate_new_definition},
     graph::GraphSnapshot,
     publish::{canonical_checksum, validate_graph},
     schema::{compile, instance_errors},
@@ -163,7 +163,7 @@ async fn editors_store_definitions_and_blueprints_that_other_organizations_canno
         .into_iter()
         .map(|definition| (definition.key, definition.version, definition.deprecated))
         .collect();
-    assert_eq!(definitions.len(), 8);
+    assert_eq!(definitions.len(), 9);
     assert_eq!(
         definitions[..2],
         [
@@ -171,7 +171,7 @@ async fn editors_store_definitions_and_blueprints_that_other_organizations_canno
             ("acme.thing".to_owned(), 2, false)
         ]
     );
-    assert_eq!(catalog::definitions_map(&mut tx).await.unwrap().len(), 8);
+    assert_eq!(catalog::definitions_map(&mut tx).await.unwrap().len(), 9);
     assert_eq!(catalog::list_blueprints(&mut tx).await.unwrap().len(), 3);
     tx.commit().await.unwrap();
 
@@ -184,8 +184,8 @@ async fn editors_store_definitions_and_blueprints_that_other_organizations_canno
             .iter()
             .all(|definition| definition.scope == "system")
     );
-    assert_eq!(definitions.len(), 6);
-    assert_eq!(catalog::definitions_map(&mut tx).await.unwrap().len(), 6);
+    assert_eq!(definitions.len(), 7);
+    assert_eq!(catalog::definitions_map(&mut tx).await.unwrap().len(), 7);
     assert_eq!(catalog::list_blueprints(&mut tx).await.unwrap().len(), 2);
     let foreign = catalog::get_blueprint(&mut tx, blueprint.id).await.unwrap();
     assert!(foreign.is_none());
@@ -498,12 +498,17 @@ async fn only_editors_write_and_only_their_own_organization() {
 #[tokio::test]
 #[serial]
 async fn system_seeds_are_idempotent_and_valid() {
-    let migration = include_str!("../../../migrations/202610250001_workflow_catalog.sql");
-    assert!(
-        migration
-            .trim_end()
-            .ends_with("SELECT corqty.seed_system_catalog();")
-    );
+    // Each migration that replaces the seed function also runs it.
+    for migration in [
+        include_str!("../../../migrations/202610250001_workflow_catalog.sql"),
+        include_str!("../../../migrations/202610260003_shell_executor.sql"),
+    ] {
+        assert!(
+            migration
+                .trim_end()
+                .ends_with("SELECT corqty.seed_system_catalog();")
+        );
+    }
 
     let database = TestDatabase::reset().await;
     for _ in 0..2 {
@@ -518,7 +523,7 @@ async fn system_seeds_are_idempotent_and_valid() {
     .fetch_one(&database.owner)
     .await
     .unwrap();
-    assert_eq!(counts, (6, 2));
+    assert_eq!(counts, (7, 2));
 
     // The system catalog needs no organization context.
     let mut conn = database.api.acquire().await.unwrap();
@@ -530,10 +535,49 @@ async fn system_seeds_are_idempotent_and_valid() {
             "corqty.mock.normalize-payload",
             "corqty.mock.produce-summary",
             "corqty.mock.task",
+            "corqty.shell.command",
             "corqty.simulated.create-rds",
             "corqty.simulated.create-vpc",
             "corqty.simulated.deploy-service",
         ]
+    );
+    let shell = &definitions[3];
+    let preset: NodeDefinitionSpec = serde_json::from_value(json!({
+        "inputs": [{"name": "input", "dataType": "core.any", "schema": {}}],
+        "outputs": [{"name": "result", "dataType": "core.any", "schema": {}}],
+        "configSchema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "minLength": 1, "maxLength": 16384, "title": "Command"},
+                "env": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "title": "Environment"
+                }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+        },
+        "uiSchema": {"command": {"widget": "textarea"}, "env": {"widget": "keyValue"}},
+        "defaults": {"command": "jq '{result: .}' \"$CORQTY_INPUT\" > \"$CORQTY_OUTPUT\"", "env": {}},
+        "executor": {"key": "shell", "version": "1.0.0"}
+    }))
+    .unwrap();
+    assert_eq!(
+        (
+            shell.id.to_string(),
+            shell.display_name.as_str(),
+            shell.description.as_str(),
+            shell.category.as_str(),
+            &shell.spec,
+        ),
+        (
+            "00000000-0000-7000-8000-000000000007".to_owned(),
+            "Shell command",
+            "Trusted: runs a shell command inside the worker container. Not a security boundary.",
+            "Shell (trusted)",
+            &preset,
+        )
     );
     for definition in &definitions {
         let new = NewNodeDefinition {
@@ -550,6 +594,10 @@ async fn system_seeds_are_idempotent_and_valid() {
             .map(|d| (d.code.as_str(), d.pointer.as_str()))
             .collect();
         assert_eq!(codes, [("reserved_key", "/key")], "{}", definition.key);
+        // A mock definition's fixed output fills each of its output ports.
+        if definition.spec.executor.key != "mock" {
+            continue;
+        }
         for port in &definition.spec.outputs {
             let value = &definition.spec.defaults["output"][port.name.as_str()];
             let validator = compile(&port.schema).unwrap();

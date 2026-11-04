@@ -218,6 +218,7 @@ async fn editors_add_and_deprecate_node_definition_versions() {
             json!(["system", "corqty.mock.normalize-payload", 1, false]),
             json!(["system", "corqty.mock.produce-summary", 1, false]),
             json!(["system", "corqty.mock.task", 1, false]),
+            json!(["system", "corqty.shell.command", 1, false]),
             json!(["system", "corqty.simulated.create-rds", 1, false]),
             json!(["system", "corqty.simulated.create-vpc", 1, false]),
             json!(["system", "corqty.simulated.deploy-service", 1, false]),

@@ -98,6 +98,7 @@ fn a_well_formed_definition_has_no_diagnostics() {
             json!({"type": "string"}),
         ),
         ("/outputs/0/schema", schema_of(MAX_SCHEMA_BYTES)),
+        ("/executor/key", json!("shell")),
     ] {
         let diagnostics = validate_new_definition(&with(pointer, value));
         assert!(diagnostics.is_empty(), "{pointer}: {diagnostics:?}");
@@ -256,7 +257,7 @@ fn each_definition_rule_reports_its_code_at_its_pointer() {
         ),
         (
             "/executor/key",
-            json!("shell"),
+            json!("python"),
             "unknown_executor",
             "/executor",
         ),

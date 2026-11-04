@@ -9,11 +9,16 @@ import type {
   Invitation,
   Member,
   NodeDefinition,
+  OrganizationSettings,
   Role,
+  Run,
+  RunSummary,
   VersionSummary,
   Workflow,
   WorkflowSummary,
+  WorkflowVersion,
 } from "@/api/types"
+import { applyEvents, type RunEventLog } from "@/runs/use-run-events"
 
 export const queryKeys = {
   organization: (organizationId: string) => ["orgs", organizationId] as const,
@@ -21,10 +26,31 @@ export const queryKeys = {
     ["orgs", organizationId, "members"] as const,
   auditEvents: (organizationId: string) =>
     ["orgs", organizationId, "audit-events"] as const,
+  settings: (organizationId: string) =>
+    ["orgs", organizationId, "settings"] as const,
   workflows: (organizationId: string) =>
     ["orgs", organizationId, "workflows"] as const,
   workflow: (organizationId: string, workflowId: string) =>
     ["orgs", organizationId, "workflows", workflowId] as const,
+  workflowVersion: (
+    organizationId: string,
+    workflowId: string,
+    version: number,
+  ) =>
+    [
+      "orgs",
+      organizationId,
+      "workflows",
+      workflowId,
+      "versions",
+      version,
+    ] as const,
+  runs: (organizationId: string, workflowId: string) =>
+    ["orgs", organizationId, "workflows", workflowId, "runs"] as const,
+  run: (organizationId: string, runId: string) =>
+    ["orgs", organizationId, "runs", runId] as const,
+  runEvents: (organizationId: string, runId: string) =>
+    ["orgs", organizationId, "runs", runId, "events"] as const,
   nodeDefinitions: (organizationId: string) =>
     ["orgs", organizationId, "node-definitions"] as const,
   blueprints: (organizationId: string) =>
@@ -91,6 +117,26 @@ export function useRemoveMember(organizationId: string) {
   return useOrganizationMutation(organizationId, (userId: string) =>
     api<void>(`/orgs/${organizationId}/members/${userId}`, {
       method: "DELETE",
+    }),
+  )
+}
+
+export function useSettings(organizationId: string) {
+  return useQuery({
+    queryKey: queryKeys.settings(organizationId),
+    queryFn: ({ signal }) =>
+      api<OrganizationSettings>(`/orgs/${organizationId}/settings`, {
+        signal,
+      }),
+  })
+}
+
+// The refresh that follows brings the new value back through useSettings.
+export function useSetShellEnabled(organizationId: string) {
+  return useOrganizationMutation(organizationId, (enabled: boolean) =>
+    api<OrganizationSettings>(`/orgs/${organizationId}/settings/shell`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
     }),
   )
 }
@@ -167,5 +213,81 @@ export function usePublishWorkflow(organizationId: string, workflowId: string) {
       `/orgs/${organizationId}/workflows/${workflowId}/publish`,
       { method: "POST", body: JSON.stringify({ revision }) },
     ),
+  )
+}
+
+export function useWorkflowVersion(
+  organizationId: string,
+  workflowId: string,
+  version: number,
+) {
+  return useQuery({
+    queryKey: queryKeys.workflowVersion(organizationId, workflowId, version),
+    queryFn: ({ signal }) =>
+      api<WorkflowVersion>(
+        `/orgs/${organizationId}/workflows/${workflowId}/versions/${version}`,
+        { signal },
+      ),
+  })
+}
+
+export function useRuns(organizationId: string, workflowId: string) {
+  return useQuery({
+    queryKey: queryKeys.runs(organizationId, workflowId),
+    queryFn: ({ signal }) =>
+      api<{ items: RunSummary[] }>(
+        `/orgs/${organizationId}/workflows/${workflowId}/runs`,
+        { signal },
+      ),
+  })
+}
+
+// Runs the given published version, not the draft.
+export function useStartRun(organizationId: string, workflowId: string) {
+  return useOrganizationMutation(
+    organizationId,
+    (body: { input: Record<string, unknown>; version: number }) =>
+      api<Run>(`/orgs/${organizationId}/workflows/${workflowId}/runs`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  )
+}
+
+// The run stream also writes this run (runs/use-run-events.ts). A refetch
+// replays the streamed events newer than its response onto it, so it never
+// moves back behind them and still brings what no event carries, like
+// cancelRequested.
+export function useRun(organizationId: string, runId: string) {
+  return useQuery({
+    queryKey: queryKeys.run(organizationId, runId),
+    queryFn: async ({ signal, client }) => {
+      const fresh = await api<Run>(`/orgs/${organizationId}/runs/${runId}`, {
+        signal,
+      })
+      const log = client.getQueryData<RunEventLog>(
+        queryKeys.runEvents(organizationId, runId),
+      )
+      return applyEvents(fresh, log?.events ?? [])
+    },
+  })
+}
+
+// The refresh that follows brings the run's cancelRequested flag.
+export function useCancelRun(organizationId: string) {
+  return useOrganizationMutation(organizationId, (runId: string) =>
+    api<RunSummary>(`/orgs/${organizationId}/runs/${runId}/cancel`, {
+      method: "POST",
+    }),
+  )
+}
+
+// A rerun starts the source run's version with its input.
+export function useRerunRun(organizationId: string) {
+  return useOrganizationMutation(organizationId, (runId: string) =>
+    api<Run>(`/orgs/${organizationId}/runs/${runId}/rerun`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   )
 }

@@ -1,4 +1,5 @@
 use corqty_domain::rbac::Role;
+use serde_json::json;
 use sqlx::{Error, PgConnection};
 use uuid::Uuid;
 
@@ -67,4 +68,50 @@ pub async fn member_role(
     .await?;
     role.map(|role| role.parse().map_err(|error| Error::Decode(Box::new(error))))
         .transpose()
+}
+
+/// Whether the organization's admins have enabled the trusted shell executor.
+pub async fn shell_enabled(conn: &mut PgConnection, organization_id: Uuid) -> Result<bool, Error> {
+    sqlx::query_scalar("SELECT shell_enabled_at IS NOT NULL FROM organizations WHERE id = $1")
+        .bind(organization_id)
+        .fetch_one(conn)
+        .await
+}
+
+/// Enables or disables the trusted shell executor and audits the change. Setting the value
+/// the organization already has changes nothing and writes no audit event.
+pub async fn set_shell_enabled(
+    conn: &mut PgConnection,
+    organization_id: Uuid,
+    actor_user_id: Uuid,
+    enabled: bool,
+) -> Result<(), Error> {
+    let changed = sqlx::query(
+        "UPDATE organizations
+         SET shell_enabled_at = CASE WHEN $2 THEN now() END
+         WHERE id = $1 AND (shell_enabled_at IS NOT NULL) <> $2",
+    )
+    .bind(organization_id)
+    .bind(enabled)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if changed == 1 {
+        let action = if enabled {
+            "organization.shell_enabled"
+        } else {
+            "organization.shell_disabled"
+        };
+        crate::audit::insert_in_transaction(
+            conn,
+            organization_id,
+            actor_user_id,
+            action,
+            "organization",
+            &organization_id.to_string(),
+            json!({}),
+        )
+        .await?;
+    }
+    Ok(())
 }

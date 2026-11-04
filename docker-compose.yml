@@ -27,7 +27,8 @@ services:
     build:
       context: .
       dockerfile: docker/rust/Dockerfile
-    command: ["cargo", "run", "--locked", "-p", "corqty-migrator"]
+      target: migrate
+    init: true
     environment:
       DATABASE_URL_OWNER: ${DATABASE_URL_OWNER:-postgres://corqty_owner:corqty_owner_dev@postgres:5432/corqty}
     depends_on:
@@ -39,11 +40,14 @@ services:
     build:
       context: .
       dockerfile: docker/rust/Dockerfile
+      target: api
+    init: true
     environment:
       DATABASE_URL_API: ${DATABASE_URL_API:-postgres://corqty_api:corqty_api_dev@postgres:5432/corqty}
       CORQTY_BIND_ADDRESS: 0.0.0.0:8080
       CORQTY_PUBLIC_WEB_URL: ${CORQTY_PUBLIC_WEB_URL:-http://localhost:3000}
       CORQTY_SECURE_COOKIES: ${CORQTY_SECURE_COOKIES:-false}
+      CORQTY_SHELL_EXECUTOR: ${CORQTY_SHELL_EXECUTOR:-disabled}
       RUST_LOG: ${RUST_LOG:-corqty_api=info,tower_http=info}
     ports:
       - "${CORQTY_API_PORT:-8080}:8080"
@@ -55,6 +59,31 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/rust/Dockerfile
+      target: worker
+    init: true
+    # The shell executor writes only to its scratch directories in /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    # A worker drains its attempts for 25 s and then gives executors 5 s to stop.
+    stop_grace_period: 30s
+    environment:
+      DATABASE_URL_WORKER: ${DATABASE_URL_WORKER:-postgres://corqty_worker:corqty_worker_dev@postgres:5432/corqty}
+      CORQTY_WORKER_CAPACITY: ${CORQTY_WORKER_CAPACITY:-4}
+      CORQTY_SHELL_EXECUTOR: ${CORQTY_SHELL_EXECUTOR:-disabled}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/corqty-worker", "healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
 
   web:
     build:

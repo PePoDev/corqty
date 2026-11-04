@@ -12,7 +12,7 @@ use crate::{
     auth::{handlers, middleware as auth_middleware},
     catalog,
     error::ApiError,
-    organizations,
+    events, organizations, runs,
     state::AppState,
     workflows,
 };
@@ -35,6 +35,14 @@ pub fn build_router(state: AppState) -> Router {
             get(organizations::members::list_members),
         )
         .route("/orgs/{organization_id}/audit-events", get(audit::list))
+        .route(
+            "/orgs/{organization_id}/settings",
+            get(organizations::settings::get_settings),
+        )
+        .route(
+            "/orgs/{organization_id}/settings/shell",
+            put(organizations::settings::set_shell),
+        )
         .route(
             "/orgs/{organization_id}/members/{target_user_id}",
             axum::routing::patch(organizations::members::change_role)
@@ -79,6 +87,23 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/orgs/{organization_id}/workflows/{workflow_id}/versions/{version}",
             get(workflows::get_version),
+        )
+        .route(
+            "/orgs/{organization_id}/workflows/{workflow_id}/runs",
+            get(runs::list_runs).post(runs::start_run),
+        )
+        .route("/orgs/{organization_id}/runs/{run_id}", get(runs::get_run))
+        .route(
+            "/orgs/{organization_id}/runs/{run_id}/cancel",
+            post(runs::cancel_run),
+        )
+        .route(
+            "/orgs/{organization_id}/runs/{run_id}/rerun",
+            post(runs::rerun),
+        )
+        .route(
+            "/orgs/{organization_id}/runs/{run_id}/events",
+            get(events::stream_events),
         )
         .route(
             "/auth/password",

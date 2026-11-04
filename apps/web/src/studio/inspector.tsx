@@ -10,6 +10,7 @@ import type {
   NodeDefinition,
   PortSpec,
 } from "@/api/types"
+import { ShellWarning } from "@/components/shell-warning"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { findDefinition } from "@/studio/graph-model"
@@ -217,6 +218,7 @@ function NodeSettings({
           {node.definition.key} v{node.definition.version}
         </p>
       </header>
+      {definition?.executor.key === "shell" && <ShellWarning />}
       <widgets.text
         label="Display name"
         schema={{ type: "string" }}

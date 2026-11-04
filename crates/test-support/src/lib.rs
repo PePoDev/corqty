@@ -4,16 +4,24 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
+/// The test database as each role connects to it. Tests that need connections of their own,
+/// for example a listener or concurrent writers, connect with these.
+pub const OWNER_URL: &str = "postgres://corqty_owner:corqty_owner_dev@127.0.0.1:55432/corqty_test";
+pub const API_URL: &str = "postgres://corqty_api:corqty_api_dev@127.0.0.1:55432/corqty_test";
+pub const WORKER_URL: &str =
+    "postgres://corqty_worker:corqty_worker_dev@127.0.0.1:55432/corqty_test";
+
 pub struct TestDatabase {
     pub owner: PgPool,
     pub api: PgPool,
+    pub worker: PgPool,
 }
 
 impl TestDatabase {
     pub async fn reset() -> Self {
         let owner = PgPoolOptions::new()
             .max_connections(5)
-            .connect("postgres://corqty_owner:corqty_owner_dev@127.0.0.1:55432/corqty_test")
+            .connect(OWNER_URL)
             .await
             .expect("connect owner test database");
         MIGRATOR.run(&owner).await.expect("run test migrations");
@@ -44,10 +52,17 @@ impl TestDatabase {
             // A single API connection makes the context-leak test prove that
             // SET LOCAL values disappear before this connection is reused.
             .max_connections(1)
-            .connect("postgres://corqty_api:corqty_api_dev@127.0.0.1:55432/corqty_test")
+            .connect(API_URL)
             .await
             .expect("connect api test database");
 
-        Self { owner, api }
+        let worker = PgPoolOptions::new()
+            // Enough for eight workers that claim at the same time.
+            .max_connections(10)
+            .connect(WORKER_URL)
+            .await
+            .expect("connect worker test database");
+
+        Self { owner, api, worker }
     }
 }

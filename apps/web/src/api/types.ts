@@ -52,6 +52,12 @@ export interface AuditEvent {
   occurredAt: string
 }
 
+export interface OrganizationSettings {
+  // False while the deployment keeps shell off (CORQTY_SHELL_EXECUTOR).
+  shellAvailable: boolean
+  shellEnabled: boolean
+}
+
 // The catalog and workflow types list only the fields the UI reads; the API
 // also sends scope, slugs and timestamps.
 export type JsonSchema = {
@@ -146,3 +152,83 @@ export interface Workflow {
 export interface VersionSummary {
   version: number
 }
+
+export interface WorkflowVersion extends VersionSummary {
+  graph: GraphSnapshot
+}
+
+// Run payloads list every field; a missing value is null.
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+
+export type NodeRunState =
+  | "blocked"
+  | "queued"
+  | "running"
+  | "retry_wait"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+  | "skipped"
+
+export interface RunSummary {
+  id: string
+  workflowId: string
+  version: number
+  status: RunStatus
+  triggerSource: string
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  cancelRequested: boolean
+}
+
+export interface NodeRun {
+  nodeId: string
+  state: NodeRunState
+  attempt: number
+  maxAttempts: number
+  executor: string
+  queueReason: "waiting_for_compatible_worker" | null
+  input: Record<string, unknown> | null
+  output: Record<string, unknown> | null
+  error: { code: string; message: string; retryable: boolean } | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export type Run = RunSummary & {
+  workflowName: string
+  input: Record<string, unknown>
+  lastEventSeq: number
+  graph: GraphSnapshot
+  nodes: NodeRun[]
+}
+
+// Event payloads omit absent keys: a node.state carries `error` when the node
+// failed or waits to retry, `output` when it succeeded, and `input` once a
+// finished attempt resolved it.
+export type RunEvent =
+  | { seq: number; type: "run.state"; state: RunStatus }
+  | {
+      seq: number
+      type: "node.state"
+      nodeId: string
+      state: NodeRunState
+      attempt: number
+      error?: NonNullable<NodeRun["error"]>
+      input?: Record<string, unknown>
+      output?: Record<string, unknown>
+    }
+  | {
+      seq: number
+      type: "node.log"
+      nodeId: string
+      stream: "stdout" | "stderr" | "system"
+      text: string
+    }
+  | { seq: number; type: "node.log_truncated"; nodeId: string }

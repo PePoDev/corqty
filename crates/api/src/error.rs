@@ -25,6 +25,8 @@ pub enum ApiError {
     PayloadTooLarge,
     #[error("unsupported media type")]
     UnsupportedMediaType,
+    #[error("too many requests")]
+    TooManyRequests(&'static str),
     #[error("validation failed")]
     Validation(&'static str),
     /// 422 whose problem body lists the diagnostics.
@@ -94,6 +96,9 @@ impl IntoResponse for ApiError {
                 "Unsupported media type",
                 "unsupported_media_type",
             ),
+            Self::TooManyRequests(code) => {
+                (StatusCode::TOO_MANY_REQUESTS, "Too many requests", code)
+            }
             Self::Validation(code) => (StatusCode::UNPROCESSABLE_ENTITY, "Validation failed", code),
             Self::Invalid {
                 code,
