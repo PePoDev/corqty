@@ -57,6 +57,20 @@ async fn register_sets_session_and_me_authenticates_it() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["user"]["email"], "admin@example.com");
     assert_eq!(json["organizations"][0]["role"], "admin");
+    assert_eq!(
+        json["organizations"][0]["capabilities"],
+        serde_json::json!([
+            "view_organization",
+            "edit_workflows",
+            "publish_workflows",
+            "run_workflows",
+            "manage_members",
+            "manage_service_tokens",
+            "manage_secrets",
+            "manage_plugins",
+            "enable_shell_executor"
+        ])
+    );
 }
 
 #[tokio::test]

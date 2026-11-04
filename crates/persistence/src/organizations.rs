@@ -1,4 +1,5 @@
-use sqlx::Error;
+use corqty_domain::rbac::Role;
+use sqlx::{Error, PgConnection};
 use uuid::Uuid;
 
 use crate::{models::OrganizationMembershipRecord, store::PgStore, tenant::begin_tenant};
@@ -48,23 +49,22 @@ impl PgStore {
             role: "admin".to_owned(),
         })
     }
+}
 
-    pub async fn membership_role(
-        &self,
-        user_id: Uuid,
-        organization_id: Uuid,
-    ) -> Result<Option<String>, Error> {
-        let mut tx = begin_tenant(&self.pool, user_id, organization_id).await?;
-        let role = sqlx::query_scalar(
-            "SELECT role
-             FROM memberships
-             WHERE organization_id = $1 AND user_id = $2",
-        )
-        .bind(organization_id)
-        .bind(user_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        tx.rollback().await?;
-        Ok(role)
-    }
+pub async fn member_role(
+    conn: &mut PgConnection,
+    organization_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<Role>, Error> {
+    let role: Option<String> = sqlx::query_scalar(
+        "SELECT role
+         FROM memberships
+         WHERE organization_id = $1 AND user_id = $2",
+    )
+    .bind(organization_id)
+    .bind(user_id)
+    .fetch_optional(conn)
+    .await?;
+    role.map(|role| role.parse().map_err(|error| Error::Decode(Box::new(error))))
+        .transpose()
 }

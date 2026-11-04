@@ -15,7 +15,7 @@ impl PasswordEngine {
         Argon2::default()
             .hash_password(password.as_bytes(), &salt)
             .map(|hash| hash.to_string())
-            .map_err(|_| ApiError::Internal)
+            .map_err(|error| ApiError::internal(error.to_string()))
     }
 
     #[must_use]
@@ -38,7 +38,7 @@ pub struct SecretToken {
 impl SecretToken {
     pub fn generate() -> Result<Self, ApiError> {
         let mut bytes = [0_u8; 32];
-        getrandom::fill(&mut bytes).map_err(|_| ApiError::Internal)?;
+        getrandom::fill(&mut bytes).map_err(|error| ApiError::internal(error.to_string()))?;
         let plaintext = URL_SAFE_NO_PAD.encode(bytes);
         Ok(Self {
             hash: Self::hash(&plaintext),

@@ -13,12 +13,12 @@ jobs:
         image: postgres:18-alpine
         env:
           POSTGRES_DB: corqty_test
-          POSTGRES_USER: corqty_owner
-          POSTGRES_PASSWORD: corqty_owner_dev
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev
         ports:
           - 55432:5432
         options: >-
-          --health-cmd "pg_isready -U corqty_owner -d corqty_test"
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d corqty_test"
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
@@ -36,12 +36,15 @@ jobs:
           cache: pnpm
       - name: Create database roles
         env:
-          PGPASSWORD: corqty_owner_dev
-        run: |
-          psql -h localhost -p 55432 -U corqty_owner -d corqty_test \
-            -c "CREATE ROLE corqty_api LOGIN PASSWORD 'corqty_api_dev' NOBYPASSRLS"
-          psql -h localhost -p 55432 -U corqty_owner -d corqty_test \
-            -c "CREATE ROLE corqty_worker LOGIN PASSWORD 'corqty_worker_dev' NOBYPASSRLS"
+          PGHOST: localhost
+          PGPORT: "55432"
+          PGPASSWORD: postgres_dev
+          POSTGRES_USER: postgres
+          POSTGRES_DB: corqty_test
+          CORQTY_OWNER_DB_PASSWORD: corqty_owner_dev
+          CORQTY_API_DB_PASSWORD: corqty_api_dev
+          CORQTY_WORKER_DB_PASSWORD: corqty_worker_dev
+        run: bash docker/postgres/init/001-roles.sh
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace

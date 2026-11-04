@@ -38,7 +38,7 @@ pub fn append_auth_cookies(
     ] {
         headers.append(
             header::SET_COOKIE,
-            HeaderValue::from_str(&value).map_err(|_| ApiError::Internal)?,
+            HeaderValue::from_str(&value).map_err(ApiError::internal)?,
         );
     }
     Ok(())

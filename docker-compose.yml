@@ -3,8 +3,9 @@ services:
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-corqty}
-      POSTGRES_USER: ${POSTGRES_OWNER_USER:-corqty_owner}
-      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD:-corqty_owner_dev}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres_dev}
+      CORQTY_OWNER_DB_PASSWORD: ${CORQTY_OWNER_DB_PASSWORD:-corqty_owner_dev}
       CORQTY_API_DB_PASSWORD: ${CORQTY_API_DB_PASSWORD:-corqty_api_dev}
       CORQTY_WORKER_DB_PASSWORD: ${CORQTY_WORKER_DB_PASSWORD:-corqty_worker_dev}
     ports:
@@ -16,7 +17,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_OWNER_USER:-corqty_owner} -d ${POSTGRES_DB:-corqty}",
+          "pg_isready -h 127.0.0.1 -U postgres -d ${POSTGRES_DB:-corqty}",
         ]
       interval: 2s
       timeout: 3s
@@ -41,7 +42,7 @@ services:
     environment:
       DATABASE_URL_API: ${DATABASE_URL_API:-postgres://corqty_api:corqty_api_dev@postgres:5432/corqty}
       CORQTY_BIND_ADDRESS: 0.0.0.0:8080
-      CORQTY_PUBLIC_WEB_URL: ${CORQTY_PUBLIC_WEB_URL:-http://localhost:5173}
+      CORQTY_PUBLIC_WEB_URL: ${CORQTY_PUBLIC_WEB_URL:-http://localhost:3000}
       CORQTY_SECURE_COOKIES: ${CORQTY_SECURE_COOKIES:-false}
       RUST_LOG: ${RUST_LOG:-corqty_api=info,tower_http=info}
     ports:
@@ -60,12 +61,17 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
-      VITE_API_PROXY: ${VITE_API_PROXY:-http://api:8080}
+      CORQTY_API_ORIGIN: ${CORQTY_API_ORIGIN:-http://api:8080}
     ports:
-      - "${CORQTY_WEB_PORT:-5173}:5173"
+      - "${CORQTY_WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
 
 volumes:
   postgres-data:

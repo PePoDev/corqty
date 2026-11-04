@@ -1,7 +1,9 @@
 use corqty_domain::{
     account::{NormalizedEmail, OrganizationName, validate_password},
     rbac::{Capability, Role},
+    slug::slugify,
 };
+use uuid::Uuid;
 
 #[test]
 fn normalizes_email_and_organization_name() {
@@ -10,6 +12,24 @@ fn normalizes_email_and_organization_name() {
 
     assert_eq!(email.as_str(), "admin@example.com");
     assert_eq!(name.as_str(), "Acme Cloud");
+}
+
+#[test]
+fn slugs_join_ascii_word_runs_and_end_with_a_suffix() {
+    let suffix_source = Uuid::from_u128(0x0123_4567_89ab_cdef_0000_0000_0000_0000);
+
+    assert_eq!(
+        slugify("Acme  Cloud", "org", suffix_source),
+        "acme-cloud-01234567"
+    );
+    assert_eq!(
+        slugify("  Café -- Ops!  ", "org", suffix_source),
+        "caf-ops-01234567"
+    );
+    assert_eq!(
+        slugify("¿?", "workflow", suffix_source),
+        "workflow-01234567"
+    );
 }
 
 #[test]
@@ -38,6 +58,25 @@ fn fixed_roles_match_the_approved_permission_matrix() {
             assert_eq!(role.allows(capability), allowed, "{role}: {capability:?}");
         }
     }
+}
+
+#[test]
+fn roles_list_their_capabilities_in_matrix_order() {
+    assert_eq!(Role::Admin.capabilities(), Capability::ALL);
+    assert_eq!(
+        Role::Editor.capabilities(),
+        [
+            Capability::ViewOrganization,
+            Capability::EditWorkflows,
+            Capability::PublishWorkflows,
+            Capability::RunWorkflows,
+        ]
+    );
+    assert_eq!(
+        Role::Runner.capabilities(),
+        [Capability::ViewOrganization, Capability::RunWorkflows]
+    );
+    assert_eq!(Role::Viewer.capabilities(), [Capability::ViewOrganization]);
 }
 
 #[test]

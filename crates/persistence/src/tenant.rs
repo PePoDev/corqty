@@ -5,7 +5,7 @@ pub async fn begin_tenant(
     pool: &PgPool,
     user_id: Uuid,
     organization_id: Uuid,
-) -> Result<Transaction<'_, Postgres>, sqlx::Error> {
+) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query(
         "SELECT
@@ -22,7 +22,7 @@ pub async fn begin_tenant(
 pub async fn begin_user(
     pool: &PgPool,
     user_id: Uuid,
-) -> Result<Transaction<'_, Postgres>, sqlx::Error> {
+) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT set_config('corqty.user_id', $1, true)")
         .bind(user_id.to_string())

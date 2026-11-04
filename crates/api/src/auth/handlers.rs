@@ -13,11 +13,12 @@ use crate::{
         service,
     },
     error::ApiError,
+    extract::{ApiJson, ApiPath},
     state::AppState,
 };
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RegisterRequest {
     email: String,
     password: String,
@@ -25,13 +26,14 @@ pub struct RegisterRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoginRequest {
     email: String,
     password: String,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChangePasswordRequest {
     current_password: String,
     new_password: String,
@@ -39,7 +41,7 @@ pub struct ChangePasswordRequest {
 
 pub async fn register(
     State(state): State<AppState>,
-    Json(request): Json<RegisterRequest>,
+    ApiJson(request): ApiJson<RegisterRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let session = service::register(
         &state,
@@ -64,7 +66,7 @@ pub async fn register(
 
 pub async fn login(
     State(state): State<AppState>,
-    Json(request): Json<LoginRequest>,
+    ApiJson(request): ApiJson<LoginRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let session = service::login(&state, &request.email, &request.password).await?;
     let mut headers = HeaderMap::new();
@@ -91,8 +93,7 @@ pub async fn logout(
     state
         .store
         .delete_session(session.user_id, session.session_id)
-        .await
-        .map_err(|_| ApiError::Internal)?;
+        .await?;
     let mut headers = HeaderMap::new();
     clear_auth_cookies(&mut headers, &state.config);
     Ok((StatusCode::NO_CONTENT, headers, ()))
@@ -101,7 +102,7 @@ pub async fn logout(
 pub async fn change_password(
     State(state): State<AppState>,
     Extension(session): Extension<SessionRecord>,
-    Json(request): Json<ChangePasswordRequest>,
+    ApiJson(request): ApiJson<ChangePasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
     service::change_password(
         &state,
@@ -117,24 +118,19 @@ pub async fn list_sessions(
     State(state): State<AppState>,
     Extension(session): Extension<SessionRecord>,
 ) -> Result<Json<Vec<corqty_persistence::models::SessionSummaryRecord>>, ApiError> {
-    let sessions = state
-        .store
-        .list_sessions(session.user_id)
-        .await
-        .map_err(|_| ApiError::Internal)?;
+    let sessions = state.store.list_sessions(session.user_id).await?;
     Ok(Json(sessions))
 }
 
 pub async fn revoke_session(
     State(state): State<AppState>,
     Extension(session): Extension<SessionRecord>,
-    axum::extract::Path(session_id): axum::extract::Path<uuid::Uuid>,
+    ApiPath(session_id): ApiPath<uuid::Uuid>,
 ) -> Result<StatusCode, ApiError> {
     let removed = state
         .store
         .revoke_user_session(session.user_id, session_id)
-        .await
-        .map_err(|_| ApiError::Internal)?;
+        .await?;
     removed
         .then_some(StatusCode::NO_CONTENT)
         .ok_or(ApiError::NotFound)
