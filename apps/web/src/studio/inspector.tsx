@@ -186,7 +186,7 @@ function Binding({
           )}
           {kind === "secret" && (
             <widgets.secretReference
-              label="Secret id"
+              label="Secret"
               schema={{}}
               value={binding?.kind === "secret" ? binding : null}
               onChange={(value) => bind(value as InputBinding | null)}

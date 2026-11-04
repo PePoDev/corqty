@@ -35,7 +35,8 @@ import {
 import { renderWithProviders, router } from "@/test/render"
 import { server } from "@/test/server"
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const uuid =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const mockTask = nodeDefinitions[2] // corqty.mock.task
 const infrastructure = blueprints[1] // corqty.simulated-infrastructure
 const workflowUrl = "/api/v1/orgs/:organizationId/workflows/:workflowId"
@@ -263,6 +264,32 @@ it("dropping a definition adds a node with a fresh id at the drop point", async 
   expect(node.style.transform).toBe("translate(40px,60px)")
 })
 
+it("keyboard palette actions insert definitions and complete blueprints", async () => {
+  withDraft({ ...infrastructure.graph, nodes: [], edges: [] })
+  const { container } = renderStudio()
+  const addTask = await screen.findByRole("button", { name: "Add Mock task" })
+  addTask.focus()
+  await userEvent.keyboard("{Enter}")
+  const task = await screen.findByRole("group", { name: "Mock task" })
+  expect(task.dataset.id).toMatch(uuid)
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Added Mock task to the canvas.",
+  )
+
+  screen.getByRole("button", { name: "Add Simulated infrastructure" }).focus()
+  await userEvent.keyboard(" ")
+  expect(
+    await screen.findByRole("group", { name: "Create VPC (simulated)" }),
+  ).toBeInTheDocument()
+  await waitFor(() =>
+    expect(container.querySelectorAll(".react-flow__edge")).toHaveLength(2),
+  )
+  expect(container.querySelectorAll(".react-flow__node")).toHaveLength(4)
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Added Simulated infrastructure to the canvas.",
+  )
+})
+
 it("dropping a blueprint inserts its nodes and edges with fresh ids", async () => {
   const { container } = renderStudio()
   await screen.findByRole("group", { name: "Create VPC (simulated)" })
@@ -354,7 +381,10 @@ it("opens a draft whose input schema and node config are not objects", async () 
   withDraft({
     ...infrastructure.graph,
     workflowInputSchema: null as unknown as JsonSchema,
-    nodes: [{ ...vpc, config: null as unknown as GraphNode["config"] }, ...rest],
+    nodes: [
+      { ...vpc, config: null as unknown as GraphNode["config"] },
+      ...rest,
+    ],
   })
   const { container } = renderStudio()
   fireEvent.click(
@@ -387,9 +417,7 @@ it.each([
 ])(
   "the canvas is read-only for $role at $width px",
   async ({ role, width, reason }) => {
-    server.use(
-      http.get("/api/v1/auth/me", () => HttpResponse.json(meAs(role))),
-    )
+    server.use(http.get("/api/v1/auth/me", () => HttpResponse.json(meAs(role))))
     Object.assign(window, { innerWidth: width })
     const { container } = renderStudio()
     const vpc = await screen.findByRole("group", {

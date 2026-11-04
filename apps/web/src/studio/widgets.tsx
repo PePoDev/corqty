@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { isRecord } from "@/studio/graph-model"
+import { useSecretCatalog } from "@/studio/secret-catalog"
 
 // Mirrors corqty_domain::catalog::FILE_TEXT_MAX_BYTES.
 export const FILE_TEXT_MAX_BYTES = 262_144
@@ -18,8 +19,6 @@ export const selectClassName =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30"
 
 const checkboxClassName = "size-4 accent-primary"
-
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export type WidgetProps = {
   label: string
@@ -194,30 +193,49 @@ function MultiSelectWidget({
   )
 }
 
-// ponytail: a UUID field until secrets exist. The text is local: only this
-// widget changes the value while it is shown.
 function SecretReferenceWidget({ label, help, value, onChange }: WidgetProps) {
   const id = useId()
-  const [text, setText] = useState(
-    isRecord(value) && typeof value.secretId === "string" ? value.secretId : "",
-  )
-  const invalid = text !== "" && !uuid.test(text)
+  const secrets = useSecretCatalog()
+  const selected =
+    isRecord(value) && typeof value.secretId === "string" ? value.secretId : ""
+  const missing =
+    selected && !secrets.items.some((secret) => secret.id === selected)
   return (
     <Labelled id={id} label={label} help={help}>
-      <Input
+      <select
         id={id}
-        value={text}
-        aria-invalid={invalid || undefined}
-        onChange={({ target }) => {
-          setText(target.value)
-          if (target.value === "") onChange(null)
-          else if (uuid.test(target.value)) {
-            onChange({ kind: "secret", secretId: target.value })
-          }
-        }}
-      />
-      {invalid && <Problem>Enter the secret id as a UUID.</Problem>}
-      <Help>Secret picker arrives with secrets.</Help>
+        className={selectClassName}
+        value={selected}
+        disabled={secrets.loading || secrets.error}
+        onChange={({ target }) =>
+          onChange(
+            target.value ? { kind: "secret", secretId: target.value } : null,
+          )
+        }
+      >
+        <option value="">
+          {secrets.loading ? "Loading secrets…" : "Choose a secret…"}
+        </option>
+        {missing && (
+          <option value={selected}>Unavailable secret ({selected})</option>
+        )}
+        {secrets.items.map((secret) => (
+          <option key={secret.id} value={secret.id}>
+            {secret.name}
+          </option>
+        ))}
+      </select>
+      {secrets.error ? (
+        <Problem>Secrets could not be loaded. Reload to try again.</Problem>
+      ) : (
+        !secrets.loading &&
+        secrets.items.length === 0 && (
+          <Help>An admin can add secrets on the Secrets page.</Help>
+        )
+      )}
+      <Help>
+        Only the reference is saved. Secret values cannot be read here.
+      </Help>
     </Labelled>
   )
 }

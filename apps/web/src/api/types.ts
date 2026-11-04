@@ -4,6 +4,7 @@ export type Capability =
   | "view_organization"
   | "edit_workflows"
   | "publish_workflows"
+  | "manage_triggers"
   | "run_workflows"
   | "manage_members"
   | "manage_service_tokens"
@@ -159,11 +160,7 @@ export interface WorkflowVersion extends VersionSummary {
 
 // Run payloads list every field; a missing value is null.
 export type RunStatus =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "canceled"
+  "queued" | "running" | "succeeded" | "failed" | "canceled"
 
 export type NodeRunState =
   | "blocked"
@@ -232,3 +229,61 @@ export type RunEvent =
       text: string
     }
   | { seq: number; type: "node.log_truncated"; nodeId: string }
+
+export interface SecretMetadata {
+  id: string
+  name: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type PluginCapability =
+  | { type: "log" | "secret-read" | "scratch-fs" }
+  | { type: "network"; host: string; port: number }
+  | { type: "command-exec"; executables: string[] }
+
+export interface PluginManifest {
+  key: string
+  version: string
+  hostContract: string
+  capabilities: PluginCapability[]
+}
+
+export interface RuntimePlugin {
+  id: string
+  key: string
+  version: string
+  hostContract: string
+  manifest: PluginManifest
+  checksum: string
+  enabled: boolean
+  approved: boolean
+  createdAt: string
+}
+
+export interface ServiceToken {
+  id: string
+  name: string
+  scope: "workflow:run"
+  createdAt: string
+  revokedAt: string | null
+}
+
+export interface TriggerInput {
+  name: string
+  workflowId: string
+  version: number
+  kind: "cron" | "webhook"
+  input: Record<string, unknown>
+  enabled: boolean
+  cron?: string | null
+  timezone?: string | null
+  overlapPolicy: "skip" | "allow"
+}
+
+export interface Trigger extends TriggerInput {
+  id: string
+  createdAt: string
+  updatedAt: string
+  nextScheduledAt: string | null
+}

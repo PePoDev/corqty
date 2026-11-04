@@ -4,7 +4,12 @@ import type { ReactNode } from "react"
 import { Providers } from "@/app/providers"
 import "./globals.css"
 
-export const metadata: Metadata = { title: "Corqty" }
+export const metadata: Metadata = {
+  title: "Corqty",
+  description:
+    "Build, schedule, and monitor typed workflows with a visual studio and durable execution.",
+  robots: { index: false, follow: false },
+}
 
 // Runs before hydration so the first paint already follows the system theme.
 const themeScript = `(() => {

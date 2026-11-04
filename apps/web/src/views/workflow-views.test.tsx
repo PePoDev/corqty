@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw/http"
 import type { ReactElement } from "react"
@@ -35,9 +35,10 @@ it("lists workflows in the order the API returns them", async () => {
     await screen.findByRole("link", { name: "Provision staging" }),
   ).toHaveAttribute("href", "/orgs/org-1/workflows/wf-2")
   const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1)
-  expect(rows.map((row) => within(row).getByRole("link").textContent)).toEqual(
-    ["Provision staging", "Nightly report"],
-  )
+  expect(rows.map((row) => within(row).getByRole("link").textContent)).toEqual([
+    "Provision staging",
+    "Nightly report",
+  ])
   expect(within(rows[0]).getByText("v1")).toBeInTheDocument()
   expect(within(rows[1]).getByText("Not published")).toBeInTheDocument()
   expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute(
@@ -167,4 +168,108 @@ it("the catalog shows the latest definitions and marks simulated entries", async
     "aria-current",
     "page",
   )
+})
+
+it("an editor creates a reusable definition pinned to a runtime plugin", async () => {
+  signedInAs("editor")
+  let created: unknown
+  server.use(
+    http.post(
+      "/api/v1/orgs/:organizationId/node-definitions",
+      async ({ request }) => {
+        created = await request.json()
+        return HttpResponse.json(
+          {
+            ...(created as object),
+            id: "definition-1",
+            version: 1,
+            deprecated: false,
+          },
+          { status: 201 },
+        )
+      },
+    ),
+  )
+  renderInShell(
+    <CatalogView
+      organizationId="org-1"
+      initialExecutor={{ key: "sample", version: "1.2.3" }}
+    />,
+    "/orgs/org-1/catalog",
+  )
+  await userEvent.type(
+    await screen.findByLabelText("Display name"),
+    "Runtime transformation",
+  )
+  await userEvent.type(
+    screen.getByLabelText("Definition key"),
+    "acme.transform",
+  )
+  expect(screen.getByLabelText("Executor key")).toHaveValue("sample")
+  expect(screen.getByLabelText("Executor version")).toHaveValue("1.2.3")
+  fireEvent.change(screen.getByLabelText("Output ports"), {
+    target: {
+      value:
+        '[{"name":"result","dataType":"core.string","schema":{"type":"string"},"required":true}]',
+    },
+  })
+  await userEvent.click(
+    screen.getByRole("button", { name: "Create definition" }),
+  )
+  expect(
+    await screen.findByText(
+      "Created Runtime transformation v1. It is available in the workflow palette.",
+    ),
+  ).toBeInTheDocument()
+  expect(created).toMatchObject({
+    key: "acme.transform",
+    displayName: "Runtime transformation",
+    executor: { key: "sample", version: "1.2.3" },
+    outputs: [{ name: "result", dataType: "core.string" }],
+  })
+})
+
+it("definition validation explains exact fields and keeps the form editable", async () => {
+  server.use(
+    http.post("/api/v1/orgs/:organizationId/node-definitions", () =>
+      HttpResponse.json(
+        {
+          code: "node_definition_invalid",
+          diagnostics: [
+            {
+              code: "executor_not_found",
+              pointer: "/executor",
+              message: "Install and approve the exact plugin version.",
+            },
+          ],
+        },
+        { status: 422 },
+      ),
+    ),
+  )
+  renderInShell(
+    <CatalogView
+      organizationId="org-1"
+      initialExecutor={{ key: "unknown", version: "1.0.0" }}
+    />,
+    "/orgs/org-1/catalog",
+  )
+  await userEvent.type(await screen.findByLabelText("Display name"), "Example")
+  await userEvent.type(screen.getByLabelText("Definition key"), "acme.example")
+  await userEvent.click(
+    screen.getByRole("button", { name: "Create definition" }),
+  )
+  expect(
+    await screen.findByRole("list", { name: "Definition problems" }),
+  ).toHaveTextContent("/executor: Install and approve")
+  expect(screen.getByLabelText("Display name")).toHaveValue("Example")
+})
+
+it("a viewer cannot create catalog definitions", async () => {
+  signedInAs("viewer")
+  renderInShell(<CatalogView organizationId="org-1" />, "/orgs/org-1/catalog")
+  await screen.findByRole("table", { name: "Node definitions" })
+  expect(
+    screen.queryByRole("button", { name: "New node definition" }),
+  ).not.toBeInTheDocument()
 })

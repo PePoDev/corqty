@@ -25,6 +25,7 @@ const capabilities: Record<Role, Capability[]> = {
     "view_organization",
     "edit_workflows",
     "publish_workflows",
+    "manage_triggers",
     "run_workflows",
     "manage_members",
     "manage_service_tokens",
@@ -36,6 +37,7 @@ const capabilities: Record<Role, Capability[]> = {
     "view_organization",
     "edit_workflows",
     "publish_workflows",
+    "manage_triggers",
     "run_workflows",
   ],
   runner: ["view_organization", "run_workflows"],
@@ -443,6 +445,18 @@ export const run: Run = {
 // A signed-in admin of org-1 who reads data and saves drafts; tests override
 // other writes and failures.
 export const handlers = [
+  http.get("/api/v1/orgs/:organizationId/secrets", () =>
+    HttpResponse.json({ items: [] }),
+  ),
+  http.get("/api/v1/orgs/:organizationId/plugins", () =>
+    HttpResponse.json({ items: [] }),
+  ),
+  http.get("/api/v1/orgs/:organizationId/service-tokens", () =>
+    HttpResponse.json({ items: [] }),
+  ),
+  http.get("/api/v1/orgs/:organizationId/triggers", () =>
+    HttpResponse.json({ items: [] }),
+  ),
   http.get("/api/v1/auth/me", () => HttpResponse.json(meAs("admin"))),
   http.get("/api/v1/orgs/:organizationId/members", () =>
     HttpResponse.json(members),

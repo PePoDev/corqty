@@ -25,6 +25,7 @@ import type {
   NodeDefinition,
 } from "@/api/types"
 import type { MappedDiagnostic } from "@/studio/diagnostics"
+import { cn } from "@/lib/utils"
 import {
   connectionError,
   fromFlow,
@@ -36,7 +37,7 @@ import {
   toFlowNode,
 } from "@/studio/graph-model"
 import { Inspector } from "@/studio/inspector"
-import { BLUEPRINT_TYPE, DEFINITION_TYPE } from "@/studio/palette"
+import { BLUEPRINT_TYPE, DEFINITION_TYPE, Palette } from "@/studio/palette"
 import { DiagnosticsContext, StudioNodeView } from "@/studio/studio-node"
 
 const nodeTypes = { step: StudioNodeView } satisfies NodeTypes
@@ -44,6 +45,7 @@ const nodeTypes = { step: StudioNodeView } satisfies NodeTypes
 type CanvasProps = {
   graph: GraphSnapshot
   definitions: NodeDefinition[]
+  paletteDefinitions: NodeDefinition[]
   blueprints: Blueprint[]
   readOnly: boolean
   problems: MappedDiagnostic[]
@@ -53,6 +55,7 @@ type CanvasProps = {
 function Canvas({
   graph,
   definitions,
+  paletteDefinitions,
   blueprints,
   readOnly,
   problems,
@@ -124,7 +127,18 @@ function Canvas({
       x: event.clientX,
       y: event.clientY,
     })
-    const definitionId = event.dataTransfer.getData(DEFINITION_TYPE)
+    insert(
+      event.dataTransfer.getData(DEFINITION_TYPE),
+      event.dataTransfer.getData(BLUEPRINT_TYPE),
+      position,
+    )
+  }
+
+  function insert(
+    definitionId: string,
+    blueprintId: string,
+    position: { x: number; y: number },
+  ) {
     const definition = definitions.find(({ id }) => id === definitionId)
     if (definition) {
       const node = toFlowNode(
@@ -132,9 +146,9 @@ function Canvas({
         definitions,
       )
       setNodes((existing) => [...existing, node])
+      setAnnouncement(`Added ${definition.displayName} to the canvas.`)
       return
     }
-    const blueprintId = event.dataTransfer.getData(BLUEPRINT_TYPE)
     const blueprint = blueprints.find(({ id }) => id === blueprintId)
     if (blueprint) {
       const next = insertBlueprint(current(), blueprint, position)
@@ -144,57 +158,78 @@ function Canvas({
       // measured size and selection.
       setNodes([...nodes, ...flow.nodes.slice(nodes.length)])
       setEdges([...edges, ...flow.edges.slice(edges.length)])
+      setAnnouncement(`Added ${blueprint.displayName} to the canvas.`)
     }
   }
 
+  // Keep keyboard additions in the visible viewport, offset from one another.
+  function addFromPalette(definitionId: string, blueprintId: string) {
+    const { x, y, zoom } = snapshot.viewport
+    const offset = 60 + (nodes.length % 6) * 28
+    insert(definitionId, blueprintId, {
+      x: (offset - x) / zoom,
+      y: (offset - y) / zoom,
+    })
+  }
+
   return (
-    <div className="grid min-h-0 xl:grid-cols-[1fr_20rem]">
-      <div className="flex min-h-96 flex-col">
-        <div className="min-h-0 flex-1">
-          <DiagnosticsContext value={problems}>
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onConnectEnd={onConnectEnd}
-              isValidConnection={isValidConnection}
-              onDragOver={readOnly ? undefined : onDragOver}
-              onDrop={readOnly ? undefined : onDrop}
-              onMoveEnd={(_, viewport) =>
-                setSnapshot((existing) => ({ ...existing, viewport }))
-              }
-              nodesDraggable={!readOnly}
-              nodesConnectable={!readOnly}
-              deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
-              defaultViewport={graph.viewport}
-              colorMode="system"
-            >
-              <Background />
-              <Controls showInteractive={false} />
-            </ReactFlow>
-          </DiagnosticsContext>
+    <div className={cn("grid min-h-0", !readOnly && "grid-cols-[16rem_1fr]")}>
+      {!readOnly && (
+        <Palette
+          definitions={paletteDefinitions}
+          blueprints={blueprints}
+          onAddDefinition={(id) => addFromPalette(id, "")}
+          onAddBlueprint={(id) => addFromPalette("", id)}
+        />
+      )}
+      <div className="grid min-h-0 xl:grid-cols-[1fr_20rem]">
+        <div className="flex min-h-96 flex-col">
+          <div className="min-h-0 flex-1">
+            <DiagnosticsContext value={problems}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={nodeTypes}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onConnectEnd={onConnectEnd}
+                isValidConnection={isValidConnection}
+                onDragOver={readOnly ? undefined : onDragOver}
+                onDrop={readOnly ? undefined : onDrop}
+                onMoveEnd={(_, viewport) =>
+                  setSnapshot((existing) => ({ ...existing, viewport }))
+                }
+                nodesDraggable={!readOnly}
+                nodesConnectable={!readOnly}
+                deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
+                defaultViewport={graph.viewport}
+                colorMode="system"
+              >
+                <Background />
+                <Controls showInteractive={false} />
+              </ReactFlow>
+            </DiagnosticsContext>
+          </div>
+          <p
+            role="status"
+            aria-live="polite"
+            className="min-h-9 border-t px-4 py-2 text-sm text-muted-foreground"
+          >
+            {announcement}
+          </p>
         </div>
-        <p
-          role="status"
-          aria-live="polite"
-          className="min-h-9 border-t px-4 py-2 text-sm text-muted-foreground"
-        >
-          {announcement}
-        </p>
+        <Inspector
+          graph={current()}
+          definitions={definitions}
+          nodeId={selected.length === 1 ? selected[0].id : null}
+          readOnly={readOnly}
+          onNodeChange={updateNode}
+          onInputSchemaChange={(workflowInputSchema) =>
+            setSnapshot((existing) => ({ ...existing, workflowInputSchema }))
+          }
+        />
       </div>
-      <Inspector
-        graph={current()}
-        definitions={definitions}
-        nodeId={selected.length === 1 ? selected[0].id : null}
-        readOnly={readOnly}
-        onNodeChange={updateNode}
-        onInputSchemaChange={(workflowInputSchema) =>
-          setSnapshot((existing) => ({ ...existing, workflowInputSchema }))
-        }
-      />
     </div>
   )
 }

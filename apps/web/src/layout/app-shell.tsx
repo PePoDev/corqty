@@ -14,6 +14,18 @@ const links = [
   { label: "Overview", suffix: "" },
   { label: "Workflows", suffix: "/workflows" },
   { label: "Catalog", suffix: "/catalog" },
+  { label: "Triggers", suffix: "/triggers" },
+  { label: "Secrets", suffix: "/secrets", capability: "edit_workflows" },
+  {
+    label: "Runtime plugins",
+    suffix: "/plugins",
+    capability: "manage_plugins",
+  },
+  {
+    label: "Service tokens",
+    suffix: "/service-tokens",
+    capability: "manage_service_tokens",
+  },
   { label: "Members", suffix: "/members" },
   { label: "Audit log", suffix: "/audit" },
   { label: "Settings", suffix: "/settings" },
@@ -77,26 +89,34 @@ export function AppShell({
           aria-label="Organization"
           className="order-3 mt-3 flex basis-full gap-1 overflow-x-auto md:order-none md:mt-0 md:flex-col"
         >
-          {links.map((link) => {
-            const href = `/orgs/${membership.organizationId}${link.suffix}`
-            const active = link.suffix
-              ? pathname.startsWith(href)
-              : pathname === href
-            return (
-              <Link
-                key={link.label}
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={`rounded-md px-3 py-2 text-sm ${
-                  active
-                    ? "bg-sidebar-accent font-medium"
-                    : "text-muted-foreground"
-                }`}
-              >
-                {link.label}
-              </Link>
+          {links
+            .filter(
+              (link) =>
+                !link.capability ||
+                membership.capabilities.some(
+                  (capability) => capability === link.capability,
+                ),
             )
-          })}
+            .map((link) => {
+              const href = `/orgs/${membership.organizationId}${link.suffix}`
+              const active = link.suffix
+                ? pathname.startsWith(href)
+                : pathname === href
+              return (
+                <Link
+                  key={link.label}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-md px-3 py-2 text-sm ${
+                    active
+                      ? "bg-sidebar-accent font-medium"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              )
+            })}
         </nav>
         <div className="ml-2 flex items-center gap-2 md:mt-auto md:ml-0 md:flex-col md:items-stretch md:gap-2 md:border-t md:pt-3">
           <span className="hidden truncate px-2 text-xs text-muted-foreground md:block">

@@ -2,6 +2,7 @@
 
 import { useBlueprints, useNodeDefinitions } from "@/api/queries"
 import type { NodeDefinition } from "@/api/types"
+import { useCan } from "@/auth/use-can"
 import { StatusBadge } from "@/components/status/status-badge"
 import {
   Table,
@@ -12,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { isSimulated } from "@/studio/graph-model"
+import { CatalogEditor } from "@/views/catalog-editor"
 
 // The API orders definitions by key, then version.
 function versionsByKey(definitions: NodeDefinition[]) {
@@ -25,7 +27,14 @@ function versionsByKey(definitions: NodeDefinition[]) {
   return [...groups.values()]
 }
 
-export function CatalogView({ organizationId }: { organizationId: string }) {
+export function CatalogView({
+  organizationId,
+  initialExecutor,
+}: {
+  organizationId: string
+  initialExecutor?: { key: string; version: string }
+}) {
+  const canEdit = useCan(organizationId, "edit_workflows")
   const definitions = useNodeDefinitions(organizationId)
   const blueprints = useBlueprints(organizationId)
 
@@ -37,6 +46,12 @@ export function CatalogView({ organizationId }: { organizationId: string }) {
           Node definitions and blueprints available to this organization.
         </p>
       </div>
+      {canEdit && (
+        <CatalogEditor
+          organizationId={organizationId}
+          initialExecutor={initialExecutor}
+        />
+      )}
       {(definitions.isPending || blueprints.isPending) && (
         <p className="text-sm text-muted-foreground">Loading catalog…</p>
       )}

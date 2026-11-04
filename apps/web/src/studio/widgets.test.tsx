@@ -4,6 +4,7 @@ import { useState } from "react"
 import { expect, it, vi } from "vitest"
 
 import type { JsonSchema } from "@/api/types"
+import { SecretCatalogContext } from "@/studio/secret-catalog"
 import { widgetFor, widgets, type WidgetName } from "@/studio/widgets"
 
 const secretId = "0190f5c2-7d1e-7a00-8000-0000000000aa"
@@ -26,7 +27,22 @@ function renderWidget(name: WidgetName, schema: JsonSchema, initial?: unknown) {
       />
     )
   }
-  render(<Harness />)
+  render(
+    <SecretCatalogContext.Provider
+      value={{
+        items: [
+          {
+            id: secretId,
+            name: "Deployment key",
+            createdAt: "2026-11-04T00:00:00Z",
+            updatedAt: "2026-11-04T00:00:00Z",
+          },
+        ],
+      }}
+    >
+      <Harness />
+    </SecretCatalogContext.Provider>,
+  )
   return onChange
 }
 
@@ -101,8 +117,7 @@ it.each<{
     schema: { type: ["object", "null"] },
     initial: null,
     edit: async () => {
-      await userEvent.click(field())
-      await userEvent.paste(secretId)
+      await userEvent.selectOptions(field(), "Deployment key")
     },
     expected: { kind: "secret", secretId },
   },

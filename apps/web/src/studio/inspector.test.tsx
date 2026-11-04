@@ -6,6 +6,7 @@ import { expect, it, vi } from "vitest"
 import type { GraphNode, GraphSnapshot, JsonSchema } from "@/api/types"
 import { newNodeFromDefinition } from "@/studio/graph-model"
 import { Inspector } from "@/studio/inspector"
+import { SecretCatalogContext } from "@/studio/secret-catalog"
 import { blueprints, nodeDefinitions, shellCommand } from "@/test/handlers"
 
 const infrastructure = blueprints[1].graph // vpc -> rds, vpc -> deploy
@@ -45,7 +46,22 @@ function renderInspector(
       />
     )
   }
-  render(<Harness />)
+  render(
+    <SecretCatalogContext.Provider
+      value={{
+        items: [
+          {
+            id: secretId,
+            name: "Deployment key",
+            createdAt: "2026-11-04T00:00:00Z",
+            updatedAt: "2026-11-04T00:00:00Z",
+          },
+        ],
+      }}
+    >
+      <Harness />
+    </SecretCatalogContext.Provider>,
+  )
   return {
     nodeChanges,
     schemaChanges,
@@ -133,17 +149,9 @@ it("binds an input to a workflow input, a literal or a secret", async () => {
 
   await userEvent.selectOptions(binding, "Secret")
   expect(lastNode()?.inputs).toEqual({})
-  expect(
-    within(region).getByText("Secret picker arrives with secrets."),
-  ).toBeInTheDocument()
-  const secret = within(region).getByLabelText("Secret id")
-  await userEvent.type(secret, "not-a-uuid")
-  expect(within(region).getByRole("alert")).toHaveTextContent(
-    "Enter the secret id as a UUID.",
-  )
-  expect(lastNode()?.inputs).toEqual({})
-  await userEvent.clear(secret)
-  await userEvent.paste(secretId)
+  const secret = within(region).getByLabelText("Secret")
+  expect(secret).not.toHaveValue(secretId)
+  await userEvent.selectOptions(secret, "Deployment key")
   expect(lastNode()?.inputs).toEqual({ region: { kind: "secret", secretId } })
 
   await userEvent.selectOptions(binding, "Not bound")

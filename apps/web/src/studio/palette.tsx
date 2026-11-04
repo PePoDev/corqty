@@ -12,15 +12,16 @@ export const BLUEPRINT_TYPE = "application/x-corqty-blueprint"
 
 type Item = { id: string; key: string; displayName: string }
 
-// ponytail: mouse drag and drop only; a keyboard "add" action can follow.
 function PaletteList({
   title,
   format,
   items,
+  onAdd,
 }: {
   title: string
   format: string
   items: Item[]
+  onAdd: (id: string) => void
 }) {
   const headingId = useId()
   return (
@@ -46,6 +47,14 @@ function PaletteList({
             <span className="block truncate font-mono text-xs text-muted-foreground">
               {item.key}
             </span>
+            <button
+              type="button"
+              aria-label={`Add ${item.displayName}`}
+              onClick={() => onAdd(item.id)}
+              className="mt-2 rounded-sm text-xs underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              Add to canvas
+            </button>
           </li>
         ))}
       </ul>
@@ -59,9 +68,13 @@ function PaletteList({
 export function Palette({
   definitions,
   blueprints,
+  onAddDefinition,
+  onAddBlueprint,
 }: {
   definitions: NodeDefinition[]
   blueprints: Blueprint[]
+  onAddDefinition: (id: string) => void
+  onAddBlueprint: (id: string) => void
 }) {
   const [filter, setFilter] = useState("")
   const query = filter.trim().toLowerCase()
@@ -85,11 +98,13 @@ export function Palette({
         title="Node definitions"
         format={DEFINITION_TYPE}
         items={latestDefinitions(definitions).filter(matches)}
+        onAdd={onAddDefinition}
       />
       <PaletteList
         title="Blueprints"
         format={BLUEPRINT_TYPE}
         items={blueprints.filter(matches)}
+        onAdd={onAddBlueprint}
       />
     </aside>
   )

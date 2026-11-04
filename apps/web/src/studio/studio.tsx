@@ -25,11 +25,10 @@ import type {
 import { useCan } from "@/auth/use-can"
 import { StatusBadge } from "@/components/status/status-badge"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 import { RunDialog } from "@/runs/run-dialog"
 import { RunsDrawer } from "@/runs/runs-drawer"
 import { mapDiagnostics, type MappedDiagnostic } from "@/studio/diagnostics"
-import { Palette } from "@/studio/palette"
+import { SecretCatalogProvider } from "@/studio/secret-catalog"
 import { useDraftAutosave, type SavedDraft } from "@/studio/use-draft-autosave"
 
 // XYFlow measures the DOM and follows the system color scheme, so the canvas
@@ -283,23 +282,21 @@ function Editor({
           </ul>
         </section>
       )}
-      <div
-        className={cn(
-          "grid min-h-0 flex-1",
-          !readOnlyReason && "grid-cols-[16rem_1fr]",
-        )}
-      >
-        {!readOnlyReason && (
-          <Palette definitions={paletteDefinitions} blueprints={blueprints} />
-        )}
-        <StudioCanvas
-          graph={workflow.draft.graph}
-          definitions={definitions}
-          blueprints={blueprints}
-          readOnly={readOnlyReason !== null}
-          problems={problems?.items ?? noProblems}
-          onChange={autosave.edit}
-        />
+      <div className="grid min-h-0 flex-1">
+        <SecretCatalogProvider
+          organizationId={organizationId}
+          enabled={canEdit}
+        >
+          <StudioCanvas
+            graph={workflow.draft.graph}
+            definitions={definitions}
+            paletteDefinitions={paletteDefinitions}
+            blueprints={blueprints}
+            readOnly={readOnlyReason !== null}
+            problems={problems?.items ?? noProblems}
+            onChange={autosave.edit}
+          />
+        </SecretCatalogProvider>
       </div>
       <RunsDrawer organizationId={organizationId} workflowId={workflow.id} />
     </section>

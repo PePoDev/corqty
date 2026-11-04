@@ -10,10 +10,7 @@ function csrfToken(): string | undefined {
     .join("=")
 }
 
-export async function api<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (typeof init.body === "string" && !headers.has("content-type")) {
     headers.set("content-type", "application/json")
@@ -26,6 +23,7 @@ export async function api<T>(
     ...init,
     headers,
     credentials: "include",
+    cache: "no-store",
   })
   if (!response.ok) {
     const problem = (await response.json().catch(() => ({}))) as {
