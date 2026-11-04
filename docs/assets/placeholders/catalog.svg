@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title description">
+  <title id="title">Node catalog — screenshot placeholder</title>
+  <desc id="description">This is an intentional placeholder, not a capture of the application. Replace it with a real Corqty screenshot following the documentation capture brief.</desc>
+  <rect width="960" height="420" rx="20" fill="#f4f4f5"/>
+  <rect x="24" y="24" width="912" height="372" rx="12" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-dasharray="10 8"/>
+  <g fill="none" stroke="#71717a" stroke-width="3" stroke-linejoin="round">
+    <rect x="450" y="94" width="60" height="48" rx="6"/>
+    <circle cx="468" cy="109" r="4"/>
+    <path d="M454 134l17-17 12 12 8-9 15 14"/>
+  </g>
+  <g text-anchor="middle" font-family="system-ui, sans-serif">
+    <text x="480" y="200" font-size="32" font-weight="650" fill="#18181b">Node catalog</text>
+    <text x="480" y="244" font-size="21" fill="#52525b">Screenshot placeholder</text>
+    <text x="480" y="292" font-size="16" fill="#71717a">Replace with a real Corqty capture using the linked brief.</text>
+  </g>
+</svg>

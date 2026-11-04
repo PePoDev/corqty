@@ -215,7 +215,7 @@ worker advertises the required exact executor or host contract.
 Re-run dependency audits when rebuilding and after new advisories appear.
 CI checks JavaScript dependencies and a guarded Rust audit; the documented
 lockfile-only RSA exception applies solely while no workspace target compiles
-that optional SQLx MySQL dependency. See [audit scope](../SECURITY.md#dependency-audit-scope).
+that optional SQLx MySQL dependency. See [audit scope](security.md#dependency-audit-scope).
 
 For stalled execution, restore compatible worker capacity and database
 connectivity first. Lease recovery runs every five seconds; do not manually
@@ -248,4 +248,4 @@ Secret filtering catches exact bound values in persisted node input views,
 logs, errors, and outputs; a detected output secret fails the node. It cannot
 guarantee detection of encoded, transformed, partial, or generated values.
 Keep credentials in secret bindings rather than literal configuration or
-ordinary workflow input. Review the [security policy](../SECURITY.md).
+ordinary workflow input. Review the [security policy](security.md).

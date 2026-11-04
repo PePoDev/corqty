@@ -16,8 +16,14 @@ and run them across horizontally scaled workers.
 The infrastructure blueprint is explicitly simulated; real Terraform, Helm,
 Pulumi, and kubectl integrations are outside this release. Billing, OIDC,
 email delivery, a plugin marketplace, and collaborative editing are also out of
-scope. See the [release checklist](docs/release-checklist.md) for verification
-evidence and remaining deployment checks.
+scope. See the [documentation index](docs/README.md), [visual tour](docs/visual-tour.md),
+and [release checklist](docs/release-checklist.md) for guides, product visuals,
+verification evidence, and remaining deployment checks.
+
+![A successful Corqty WebAssembly workflow with live run details](docs/assets/screenshots/runtime-success.jpg)
+
+Recorded with synthetic data. The [visual tour](docs/visual-tour.md) includes
+another real capture and clearly labeled placeholders with briefs for future images.
 
 ## Start locally
 
@@ -111,7 +117,7 @@ integration-test processes against port 55432 at once: they reset shared test
 data. Shell contract tests require Linux; CI runs them there. For the guarded
 Rust dependency audit, install `cargo-audit` 0.22.2 and run
 `./scripts/audit-rust.ps1` in PowerShell. Its single lockfile-only exception is
-documented in [SECURITY.md](SECURITY.md).
+documented in the [security guide](docs/security.md#dependency-audit-scope).
 
 The full smoke suites use a disposable stack with three workers and trusted
 shell enabled. In PowerShell:
@@ -131,12 +137,32 @@ Use `docker compose --project-name corqty-check down` to stop the stack while
 preserving its data. Remove volumes only when intentionally discarding a test
 environment.
 
-## Deploy and contribute
+## Documentation and deployment
 
 Use the [operations guide](docs/operations.md) for HTTPS, backups, upgrades,
 worker limits, and incident recovery. The [automation guide](docs/automation.md)
 documents service tokens, cron, webhook signing, retention, and deployment limits.
 
-Contributions are welcome under the [contribution guide](CONTRIBUTING.md),
-[code of conduct](CODE_OF_CONDUCT.md), and [security policy](SECURITY.md).
+Use the [development guide](docs/development.md), [testing guide](docs/testing.md),
+and [security policy](docs/security.md) when changing or extending the project.
+Dockerfiles and Compose overrides are organized under [docker/](docker/README.md);
+the WASM example lives under [plugins/example-wasm](plugins/example-wasm/README.md).
 Corqty is licensed under [Apache-2.0](LICENSE).
+
+## Agent documentation requirements
+
+For **every task**, agents must review the relevant Markdown documentation under
+`docs/` and keep it accurate as part of completing that task:
+
+- Update affected guides in the same change as code, API, schema, configuration,
+  deployment, command, file-layout, or user-interface changes.
+- Document new behavior, defaults, permissions, limits, examples, and operational
+  implications. Remove obsolete instructions and repair links after moves/deletions.
+- Keep the [documentation index](docs/README.md), diagrams, screenshots, and
+  [image capture briefs](docs/assets/README.md) consistent with the product.
+  Clearly label image placeholders; never present invented UI as a screenshot.
+- Check relevant links, examples, and commands. Do not mark a task complete while
+  its documentation is missing or stale. If a task needs no documentation change,
+  confirm that the relevant docs were reviewed in the completion summary.
+- Commit each completed task, including its documentation updates, and follow the
+  repository owner's branch and push instructions.

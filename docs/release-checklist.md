@@ -31,7 +31,7 @@ that a public SaaS deployment has been provisioned or independently audited.
 - [x] Frontend dependency audit is clean at the checked lockfile.
 - [x] Guarded Rust audit passed after TLS/Tokio dependency updates; its sole
   `RUSTSEC-2023-0071` exception is an uncompiled optional dependency, enforced by
-  a workspace/all-targets dependency-tree check. See [audit scope](../SECURITY.md#dependency-audit-scope).
+  a workspace/all-targets dependency-tree check. See [audit scope](security.md#dependency-audit-scope).
 - [x] Focused automation, plugin, and secrets integration tests pass.
 - [x] Targeted Rust clippy checks pass with warnings denied.
 - [x] Production Compose override parses with `config --quiet`.
@@ -44,7 +44,8 @@ that a public SaaS deployment has been provisioned or independently audited.
   [GitHub Actions run 41837404675](https://github.com/PePoDev/corqty/actions/runs/41837404675).
   This includes workspace formatting/clippy/tests, frontend lint/tests/build,
   both dependency audits, a fresh three-worker Compose build, and both smoke
-  suites. Subsequent documentation-only commits record verification and cleanup.
+  suites. This records the original release implementation; later changes must
+  be verified on their own revision.
 
 The first full Windows compilation exceeded available paging resources. Bounded
 build concurrency and reduced dependency debug information resolved it; the
@@ -63,5 +64,5 @@ implementation and local smoke verification:
 - [ ] Maintainer private vulnerability reporting/contact configured as desired.
 
 Use [operations](operations.md) for deployment/recovery procedures and
-[SECURITY.md](../SECURITY.md) for trust boundaries. Billing, OIDC, SMTP, a public
+[security](security.md) for trust boundaries. Billing, OIDC, SMTP, a public
 plugin marketplace, and real infrastructure executors are outside this release.
