@@ -38,6 +38,7 @@ pull requests are used, per the user's instruction.
 - [ ] Complete the pushed revision's CI and record its run in docs/release-checklist.md.
 - [x] Remove unused Docker containers/images after delivery verification:
   one stopped container and 20 unused images removed, reclaiming 6.42 GB.
+  Unused build cache cleared separately, reclaiming another 39.02 GB.
   Seven healthy running containers and all data volumes were preserved.
 
 Deployment-specific domain/TLS, backups/restore drills, capacity/monitoring, and
