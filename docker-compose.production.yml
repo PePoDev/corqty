@@ -1,0 +1,34 @@
+# Use with docker-compose.yml. Only the HTTPS edge publishes ports.
+services:
+  postgres:
+    ports: !reset []
+    restart: unless-stopped
+  api:
+    ports: !reset []
+    environment:
+      CORQTY_PUBLIC_WEB_URL: https://${CORQTY_DOMAIN:?Set your public domain}
+      CORQTY_SECURE_COOKIES: "true"
+      CORQTY_SHELL_EXECUTOR: disabled
+  worker:
+    environment:
+      CORQTY_SHELL_EXECUTOR: disabled
+  web:
+    ports: !reset []
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      CORQTY_DOMAIN: ${CORQTY_DOMAIN:?Set your public domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+volumes:
+  caddy-data:
+  caddy-config:

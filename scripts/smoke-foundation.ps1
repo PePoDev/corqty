@@ -610,3 +610,36 @@ foreach ($service in @("migrate", "api")) {
         throw "The $service container runs as user '$user', not 10001:10001"
     }
 }
+
+# A precompiled component installs, is approved for its exact checksum, and is
+# published by an editor. Workers discover it by host contract without a restart.
+$pluginDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) "examples/plugins"
+$manifest = @{
+    key = "hello"; version = "1.0.0"; hostContract = "1"
+    capabilities = @(@{ type = "log" })
+}
+$componentBytes = [System.IO.File]::ReadAllBytes((Join-Path $pluginDirectory "hello.wasm"))
+$installed = Invoke-SmokeRequest -User $admin -Method Post -Path "$organizationPath/plugins" -Body @{
+    manifest = $manifest; componentBase64 = [Convert]::ToBase64String($componentBytes)
+}
+if ($installed.Status -ne 201) { throw "Component installation returned $($installed.Status): $($installed.Body | ConvertTo-Json -Depth 8)" }
+$approved = Invoke-SmokeRequest -User $admin -Method Put -Path "$organizationPath/plugins/$($installed.Body.id)/approval" -Body @{
+    checksum = $installed.Body.checksum; capabilities = $manifest.capabilities
+}
+if ($approved.Status -ne 200 -or -not $approved.Body.approved) { throw "Component approval failed" }
+$definition = Invoke-SmokeRequest -User $editor -Method Post -Path "$organizationPath/node-definitions" -Body @{
+    key = "example.hello"; displayName = "Hello component"; category = "Examples"
+    inputs = @(); outputs = @(@{ name = "result"; dataType = "core.string"; schema = @{ type = "string" }; required = $true })
+    configSchema = @{ type = "object" }; uiSchema = @{}; defaults = @{}
+    executor = @{ key = "hello"; version = "1.0.0" }
+}
+if ($definition.Status -ne 201) { throw "Runtime node definition failed: $($definition.Status)" }
+$hello = New-SmokeTask -Id "hello"
+$hello.definition.key = "example.hello"
+$hello.config = @{}
+$componentPath = Publish-SmokeWorkflow -Name "Smoke WebAssembly" -Nodes @($hello)
+$componentRun = Wait-SmokeRun (Start-SmokeRun $componentPath).id
+if ($componentRun.status -ne "succeeded" -or (Get-SmokeNode $componentRun "hello").output.result -ne "hello from wasm") {
+    throw "The WebAssembly component run failed: $($componentRun | ConvertTo-Json -Depth 12)"
+}
+Write-Host "Foundation, execution, live events, shell and runtime component smoke checks passed."

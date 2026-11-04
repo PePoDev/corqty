@@ -1,5 +1,11 @@
 name: ci
 
+permissions:
+  contents: read
+
+env:
+  CARGO_BUILD_JOBS: 2
+
 on:
   push:
   pull_request:
@@ -52,6 +58,15 @@ jobs:
       - run: pnpm web:lint
       - run: pnpm web:test
       - run: pnpm web:build
+      - run: pnpm audit --audit-level=low
+      - name: Audit compiled Rust dependencies
+        shell: pwsh
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/audit-rust.ps1
+      - name: Generate isolated Compose credentials
+        run: sh scripts/init-local.sh
       - name: Start fresh Compose stack
         env:
           CORQTY_WORKER_CAPACITY: "1"
@@ -59,7 +74,9 @@ jobs:
         run: docker compose --project-name corqty-ci up --build --wait --scale worker=3
       - name: Run Compose smoke test
         shell: pwsh
-        run: ./scripts/smoke-foundation.ps1 -ProjectName corqty-ci -ExpectedWorkers 3
+        run: |
+          ./scripts/smoke-foundation.ps1 -ProjectName corqty-ci -ExpectedWorkers 3
+          ./scripts/smoke-automation.ps1
       - name: Remove Compose stack
         if: always()
         run: docker compose --project-name corqty-ci down --volumes

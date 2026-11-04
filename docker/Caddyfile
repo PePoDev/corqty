@@ -1,0 +1,7 @@
+{$CORQTY_DOMAIN} {
+	header Strict-Transport-Security "max-age=31536000"
+	# No response compression: execution SSE must flush without buffering.
+	reverse_proxy web:3000 {
+		flush_interval -1
+	}
+}

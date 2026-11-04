@@ -8,7 +8,7 @@ COPY migrations ./migrations
 RUN --mount=type=cache,id=corqty-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=corqty-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=corqty-target,target=/workspace/target,sharing=locked \
-    cargo build --release --locked -p corqty-api -p corqty-migrator -p corqty-worker \
+    cargo build --release --locked --jobs 2 -p corqty-api -p corqty-migrator -p corqty-worker \
     && install -D -m 0755 -t /out \
         target/release/corqty-api target/release/corqty-migrator target/release/corqty-worker
 

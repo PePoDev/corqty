@@ -1,6 +1,7 @@
 .superpowers/
 .env
 .env.local
+.env.initializing
 target/
 node_modules/
 dist/

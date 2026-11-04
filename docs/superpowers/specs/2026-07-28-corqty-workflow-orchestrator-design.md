@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 
-**Status:** Approved; Milestone 1 foundation, Milestone 2 catalog and studio, and Milestone 3 execution core implemented
+**Status:** Approved; Milestones 1–5 implemented. Release evidence is maintained in `docs/release-checklist.md`.
 
 ## 1. Product summary
 
