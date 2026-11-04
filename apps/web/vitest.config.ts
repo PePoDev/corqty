@@ -12,5 +12,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // Each jsdom worker owns a browser, query cache, and network interceptor.
+    // Bound concurrency so local builds and two-core CI get comparable load.
+    maxWorkers: 2,
   },
 })
