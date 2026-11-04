@@ -89,7 +89,7 @@ fn planned(
 #[test]
 fn node_transitions_follow_the_run_lifecycle() {
     use NodeState::{Blocked, Canceled, Failed, Queued, RetryWait, Running, Skipped, Succeeded};
-    // Spec §11.1, plus retry_wait -> canceled (cancel stops a pending retry) and
+    // Lifecycle transitions include retry_wait -> canceled (cancel stops a pending retry) and
     // retry_wait -> running (a due retry is claimed directly).
     let allowed = [
         (Blocked, Queued),

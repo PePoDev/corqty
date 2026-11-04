@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! The logical contract between the worker and an executor (spec §10.1).
+//! The logical contract between the worker and an executor.
 //! Compiled executors and runtime components implement the same operations.
 
 use std::collections::HashMap;
@@ -18,7 +18,7 @@ use zeroize::Zeroize;
 /// The host contract version this worker implements.
 pub const HOST_CONTRACT: &str = "1";
 
-/// A host operation an executor declares it needs (spec §10.3).
+/// A host operation an executor declares it needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Capability {
     Log,

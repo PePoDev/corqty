@@ -1,6 +1,6 @@
 # Contributing
 
-Start with the [README](README.md), the [approved product specification](docs/superpowers/specs/2026-07-28-corqty-workflow-orchestrator-design.md), and the relevant crate or web tests.
+Start with the [README](README.md), the [operations guide](docs/operations.md), and the relevant crate or web tests.
 For a substantial change, open an issue describing the user problem and proposed
 scope before investing in a large implementation. Small fixes can go directly
 to a pull request. Maintainer availability varies; no response time is promised.

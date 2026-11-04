@@ -62,9 +62,8 @@ impl NodeState {
         }
     }
 
-    /// Whether a node may move from `self` to `to`: spec §11.1, plus `retry_wait` to
-    /// `canceled` (a cancel stops a pending retry) and to `running` (a due retry is claimed
-    /// directly). The SQL functions perform only these transitions.
+    /// Whether a node may move from `self` to `to`. A pending retry may be canceled
+    /// or claimed directly as running. The SQL functions perform only these transitions.
     #[must_use]
     pub const fn can_transition(self, to: Self) -> bool {
         matches!(

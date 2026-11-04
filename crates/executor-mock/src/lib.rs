@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! The deterministic mock executor `mock@1.0.0` (spec §10.3). It powers both starter
+//! The deterministic mock executor `mock@1.0.0`. It powers both starter
 //! blueprints and the scheduler tests: it waits, then returns a fixed output or echoes its
 //! inputs, or fails the way its config says.
 

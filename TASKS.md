@@ -48,5 +48,5 @@ Deployment-specific domain/TLS, backups/restore drills, capacity/monitoring, and
 customer access/support decisions belong to the deployment owner. They are
 listed explicitly in docs/release-checklist.md. No public hosting was provisioned.
 
-See docs/operations.md, docs/automation.md, examples/plugins/README.md and the
-2026-11-04 milestone plans for implementation decisions and operating details.
+See docs/operations.md, docs/automation.md and examples/plugins/README.md for
+implementation decisions and operating details.

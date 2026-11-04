@@ -1,8 +1,8 @@
 # First-release acceptance record
 
 Recorded 2026-11-04 against the integrated Milestones 1–5 implementation.
-This maps the approved specification's twelve acceptance criteria to concrete
-checks. A local result is evidence for that checked environment, not a claim
+This records twelve release acceptance criteria and their concrete checks.
+A local result is evidence for that checked environment, not a claim
 that a public SaaS deployment has been provisioned or independently audited.
 
 ## Acceptance criteria

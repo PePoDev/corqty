@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! The worker (spec §10.2). It claims the node runs whose executor it has, runs each attempt
+//! The worker claims the node runs whose executor it has, runs each attempt
 //! under a lease that it keeps renewing, and reports the attempt's logs and outcome. It
 //! reaches the database only through the worker role's `corqty` functions.
 

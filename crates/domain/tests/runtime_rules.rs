@@ -328,7 +328,7 @@ fn outputs_over_one_mebibyte_fail_as_output_too_large() {
 
 #[test]
 fn limits_match_the_spec() {
-    // Spec §15: 1 MiB run input, resolved node input and node output; 10 MiB of logs per node run.
+    // Default limits: 1 MiB run input, resolved node input and node output; 10 MiB of logs per node run.
     assert_eq!(MAX_RUN_INPUT_BYTES, 1_048_576);
     assert_eq!(MAX_NODE_INPUT_BYTES, 1_048_576);
     assert_eq!(MAX_NODE_OUTPUT_BYTES, 1_048_576);

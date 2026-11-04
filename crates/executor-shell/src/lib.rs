@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! The trusted shell executor `shell@1.0.0` (spec §10.4). It runs `/bin/sh -c <command>` as
+//! The trusted shell executor `shell@1.0.0`. It runs `/bin/sh -c <command>` as
 //! the worker's own user, in the attempt's scratch directory, with a small fixed environment.
 //! It is not a security boundary: a command can do anything the worker container allows, so
 //! only an organization admin can turn it on, for users they trust.
