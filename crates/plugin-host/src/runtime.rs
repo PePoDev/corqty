@@ -697,8 +697,9 @@ mod tests {
     #[tokio::test]
     async fn epoch_interrupts_an_active_guest_with_unlimited_fuel() {
         let manifest: PluginManifest =
-            serde_json::from_str(include_str!("../../../examples/plugins/manifest.json")).unwrap();
-        let text = include_str!("../../../examples/plugins/hello.wat").replace(
+            serde_json::from_str(include_str!("../../../plugins/example-wasm/manifest.json"))
+                .unwrap();
+        let text = include_str!("../../../plugins/example-wasm/hello.wat").replace(
             "(result i32) i32.const 16)",
             "(result i32) (loop br 0) i32.const 16)",
         );

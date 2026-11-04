@@ -613,7 +613,7 @@ foreach ($service in @("migrate", "api")) {
 
 # A precompiled component installs, is approved for its exact checksum, and is
 # published by an editor. Workers discover it by host contract without a restart.
-$pluginDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) "examples/plugins"
+$pluginDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) "plugins/example-wasm"
 $manifest = @{
     key = "hello"; version = "1.0.0"; hostContract = "1"
     capabilities = @(@{ type = "log" })

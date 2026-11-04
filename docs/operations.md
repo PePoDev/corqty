@@ -15,8 +15,8 @@ to the host and permit inbound TCP 80 and 443 for Caddy's HTTPS service and
 certificate issuance. Do not publish database, API, or worker ports externally.
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
-docker compose -f docker-compose.yml -f docker-compose.production.yml up --build --wait
+docker compose -f docker-compose.yml -f docker/compose.production.yml config --quiet
+docker compose -f docker-compose.yml -f docker/compose.production.yml up --build --wait
 ```
 
 The override starts Caddy with persistent certificate/configuration volumes,
@@ -80,7 +80,7 @@ when they differ. The commands copy archive files rather than piping binary
 data through PowerShell's text redirection.
 
 ```sh
-dc() { docker compose -f docker-compose.yml -f docker-compose.production.yml "$@"; }
+dc() { docker compose -f docker-compose.yml -f docker/compose.production.yml "$@"; }
 backup_stamp=$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "backups/$backup_stamp"
 dc exec -T postgres pg_dump -U postgres -d corqty --format=custom --file=/tmp/corqty.dump

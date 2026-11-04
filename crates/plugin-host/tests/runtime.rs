@@ -8,10 +8,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 fn manifest() -> PluginManifest {
-    serde_json::from_str(include_str!("../../../examples/plugins/manifest.json")).unwrap()
+    serde_json::from_str(include_str!("../../../plugins/example-wasm/manifest.json")).unwrap()
 }
 fn source() -> String {
-    include_str!("../../../examples/plugins/hello.wat").to_owned()
+    include_str!("../../../plugins/example-wasm/hello.wat").to_owned()
 }
 fn request() -> ExecuteRequest {
     ExecuteRequest {
@@ -39,7 +39,7 @@ async fn precompiled_component_matches_source_and_runs() {
     let bytes = wat::parse_str(source()).unwrap();
     assert_eq!(
         bytes,
-        include_bytes!("../../../examples/plugins/hello.wasm")
+        include_bytes!("../../../plugins/example-wasm/hello.wasm")
     );
     let plugin = RuntimePlugin::new(manifest(), bytes, vec![]).await.unwrap();
     plugin.verify().await.unwrap();

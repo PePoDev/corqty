@@ -59,8 +59,8 @@ start, retry, and cancel runs; viewers have read access. Secret plaintext is
 never returned by a later secret API read.
 
 For a runtime plugin example, install
-[`examples/plugins/hello.wasm`](examples/plugins/hello.wasm) with its
-[`manifest.json`](examples/plugins/manifest.json) from the Plugins page. Add a
+[`plugins/example-wasm/hello.wasm`](plugins/example-wasm/hello.wasm) with its
+[`manifest.json`](plugins/example-wasm/manifest.json) from the Plugins page. Add a
 node definition bound to `hello` version `1.0.0`, with a string output named
 `result`; its output is
 `{"result":"hello from wasm"}`. The versioned host interface lives in
@@ -95,7 +95,7 @@ Local development uses the versions pinned in `rust-toolchain.toml` and
 `package.json`; CI uses Node 24. Start the disposable integration database, then:
 
 ```sh
-docker compose -f docker-compose.test.yml up -d --wait
+docker compose -f docker/compose.test.yml up -d --wait
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

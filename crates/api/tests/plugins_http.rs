@@ -24,8 +24,8 @@ async fn runtime_install_publish_worker_filtering_and_disable_are_tenant_scoped(
     let admin = AuthFixture::registered("plugins@example.com", "Components").await;
     let org = format!("/api/v1/orgs/{}", admin.organization_id);
     let manifest: Value =
-        serde_json::from_str(include_str!("../../../examples/plugins/manifest.json")).unwrap();
-    let upload = json!({"manifest":manifest,"componentBase64":STANDARD.encode(include_bytes!("../../../examples/plugins/hello.wasm"))});
+        serde_json::from_str(include_str!("../../../plugins/example-wasm/manifest.json")).unwrap();
+    let upload = json!({"manifest":manifest,"componentBase64":STANDARD.encode(include_bytes!("../../../plugins/example-wasm/hello.wasm"))});
     let plugin = body(
         admin
             .post_json(&format!("{org}/plugins"), &upload.to_string())
@@ -167,14 +167,14 @@ async fn invalid_components_and_stale_approvals_never_install_or_approve() {
     let admin = AuthFixture::registered("invalid-plugin@example.com", "Components").await;
     let path = format!("/api/v1/orgs/{}/plugins", admin.organization_id);
     let manifest: Value =
-        serde_json::from_str(include_str!("../../../examples/plugins/manifest.json")).unwrap();
+        serde_json::from_str(include_str!("../../../plugins/example-wasm/manifest.json")).unwrap();
     let invalid =
         json!({"manifest":manifest,"componentBase64":STANDARD.encode(b"uploaded source code")});
     assert_eq!(
         admin.post_json(&path, &invalid.to_string()).await.status(),
         StatusCode::UNPROCESSABLE_ENTITY
     );
-    let valid = json!({"manifest":manifest,"componentBase64":STANDARD.encode(include_bytes!("../../../examples/plugins/hello.wasm"))});
+    let valid = json!({"manifest":manifest,"componentBase64":STANDARD.encode(include_bytes!("../../../plugins/example-wasm/hello.wasm"))});
     let plugin = body(
         admin.post_json(&path, &valid.to_string()).await,
         StatusCode::CREATED,

@@ -121,7 +121,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: apps/web/Dockerfile
+      dockerfile: docker/web/Dockerfile
       args:
         CORQTY_API_ORIGIN: ${CORQTY_API_ORIGIN:-http://api:8080}
     restart: unless-stopped
