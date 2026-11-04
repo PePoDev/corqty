@@ -23689,3 +23689,26 @@ Expected: `✓ Compiled successfully` and `Finished TypeScript`. The route table
 git add apps/web
 git commit -m "fix: keep live run views accurate and reconnecting"
 ```
+
+## Follow-up: Node 24 SSE test isolation (2026-11-04)
+
+The original Task 20 verification used Node 26.12.1. Re-running on Node
+24.22.2 reproduced failures in both SSE test files, including an empty
+connection list in the selected-node details test. The same tests passed
+when run individually. Temporary fetch instrumentation showed
+`TypeError: fetch failed` / `ECONNREFUSED`: the request reached a real
+localhost socket instead of the registered MSW handler. Increasing the
+assertion timeout cannot repair a bypassed handler.
+
+MSW 3's Node fetch interceptor works at the socket layer. Tests now create
+an Undici Agent in `beforeEach` and destroy it after React cleanup but
+before `server.resetHandlers()`. This isolates the native-fetch connection
+pool as well as the handlers. The original global dispatcher is restored
+after the suite. `undici` 7.29.0 is an explicit test dependency. Production
+SSE behavior and test assertion timeouts are unchanged.
+
+Validation: the full suite on Node 24.22.2 passed (17 files, 120 tests).
+Current Undici test-pool and MSW lifecycle documentation was fetched with
+Context7; the failure was also confirmed against the installed interceptor
+implementation. This follow-up supersedes Task 20's claim that its local
+Node 26 run established CI compatibility.

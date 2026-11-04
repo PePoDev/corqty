@@ -2,7 +2,8 @@
 import "@/test/event-source"
 import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
-import { afterAll, afterEach, beforeAll, vi } from "vitest"
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici"
+import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest"
 
 import { server } from "@/test/server"
 
@@ -78,11 +79,25 @@ Object.assign(window, {
 })
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }))
-afterEach(() => {
+// MSW 3 intercepts Node fetch at the socket layer. A pooled Node 24 socket
+// left by an aborted SSE stream can outlive resetHandlers and bypass the
+// next test's handlers. Give each test its own pool, including normal API
+// reads, and wait for its sockets to close before resetting the server.
+const originalDispatcher = getGlobalDispatcher()
+let dispatcher: Agent
+beforeEach(() => {
+  dispatcher = new Agent({ keepAliveTimeout: 10, keepAliveMaxTimeout: 10 })
+  setGlobalDispatcher(dispatcher)
+})
+afterEach(async () => {
   cleanup()
+  await dispatcher.destroy()
   server.resetHandlers()
   sessionStorage.clear()
   vi.clearAllMocks()
   Object.assign(window, { innerWidth: 1024 })
 })
-afterAll(() => server.close())
+afterAll(() => {
+  server.close()
+  setGlobalDispatcher(originalDispatcher)
+})
