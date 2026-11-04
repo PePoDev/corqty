@@ -71,11 +71,13 @@ service; defining an arbitrary variable in `.env` alone does not inject it.
 | `CORQTY_MAX_TIMEOUT_SECONDS` | 14,400 | Maximum node timeout |
 | `CORQTY_DEFAULT_TIMEOUT_SECONDS` | 900 by default | Default node timeout; must not exceed configured maximum |
 
-When the default timeout is **unset**, it becomes the smaller of 900 and the
-configured maximum. If `.env` explicitly contains 900 and you lower the maximum
-below 900, lower the explicit default too. Existing runs capture some limits at
-creation, including log and timeout ceilings; changing configuration is not a
-retroactive rewrite of run snapshots.
+For a direct Rust process, an **unset** default timeout becomes the smaller of
+900 and the configured maximum. Compose explicitly forwards a default of 900
+even when the variable is absent from `.env`. When lowering the maximum below
+900 in Compose, set `CORQTY_DEFAULT_TIMEOUT_SECONDS` to a value at or below that
+maximum too. Existing runs capture some limits at creation, including log and
+timeout ceilings; changing configuration is not a retroactive rewrite of run
+snapshots.
 
 The plugin HTTP route allows a larger JSON envelope for base64 component bytes.
 Ingress limits must accommodate this separately from the 1 MiB webhook limit.

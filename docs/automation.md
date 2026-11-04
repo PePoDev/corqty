@@ -320,8 +320,10 @@ hard ceilings cannot be raised in this release; lower values are supported:
 | `CORQTY_MAX_WASM_MEMORY_BYTES` | 268,435,456 |
 | `CORQTY_MAX_TIMEOUT_SECONDS` | 14,400 |
 
-`CORQTY_DEFAULT_TIMEOUT_SECONDS` defaults to 900, or a lower configured maximum.
-Omitted timeout fields use that value. Node log and timeout ceilings are captured
+`CORQTY_DEFAULT_TIMEOUT_SECONDS` normally defaults to 900. Direct binaries lower
+an unset default to fit a smaller maximum, but Compose supplies 900 explicitly;
+Compose operators lowering the maximum below 900 must also lower the default.
+Omitted node timeout fields use the configured default. Node log and timeout ceilings are captured
 when a run is created. Input/output limits are enforced by workers. Keep API and
 worker settings aligned. The database truncates logs at a UTF-8 boundary and
 emits exactly one truncation event.
