@@ -1,0 +1,22 @@
+package corqty:executor@1.0.0;
+
+/// No ambient WASI imports are provided. Every host operation checks its approval.
+interface host {
+    log: func(message: string);
+    secret-read: func(id: string) -> result<string, string>;
+    scratch-read: func(name: string) -> result<list<u8>, string>;
+    scratch-write: func(name: string, bytes: list<u8>) -> result<_, string>;
+    network: func(host: string, port: u16, request: list<u8>) -> result<list<u8>, string>;
+    command-exec: func(executable: string, arguments: list<string>) -> result<string, string>;
+    cancelled: func() -> bool;
+}
+
+world executor {
+    import host;
+    /// Canonical JSON PluginManifest; must equal the manifest supplied at install.
+    export metadata: func() -> string;
+    /// JSON array of {code, pointer, message} diagnostics.
+    export validate: func(config-json: string) -> string;
+    /// JSON request with opaque secret references; JSON object output or error JSON.
+    export execute: func(request-json: string) -> result<string, string>;
+}

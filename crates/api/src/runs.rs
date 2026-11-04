@@ -1,20 +1,25 @@
-use axum::{Extension, Json, extract::State, http::StatusCode};
+use axum::{
+    Extension, Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+};
 use corqty_domain::{
     diagnostic::Diagnostic,
     publish::shell_diagnostics,
     rbac::Capability,
     run::plan_run,
-    runtime::MAX_RUN_INPUT_BYTES,
     schema::{compile, instance_errors},
 };
 use corqty_persistence::{
+    automation::{self, ServicePrincipal},
     catalog,
     models::SessionRecord,
-    runs::{self, CancelError, NewRun, RunRecord, RunSummaryRecord},
+    runs::{self, CancelError, NewRun, RunOrigin, RunRecord, RunSummaryRecord},
     workflows,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -26,7 +31,7 @@ use crate::{
     state::AppState,
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StartRun {
     #[serde(default)]
@@ -64,13 +69,70 @@ pub async fn list_runs(
 /// at most 1 MiB of JSON and matches that version's workflow input schema.
 pub async fn start_run(
     State(state): State<AppState>,
-    Extension(session): Extension<SessionRecord>,
+    session: Option<Extension<SessionRecord>>,
+    principal: Option<Extension<ServicePrincipal>>,
     ApiPath((organization_id, workflow_id)): ApiPath<(Uuid, Uuid)>,
+    headers: HeaderMap,
     ApiJson(request): ApiJson<StartRun>,
 ) -> Result<(StatusCode, Json<RunRecord>), ApiError> {
-    let mut access = authorize(&state, &session, organization_id, Capability::RunWorkflows).await?;
+    let (mut access, origin, actor) = if let Some(Extension(principal)) = principal {
+        if principal.organization_id != organization_id {
+            return Err(ApiError::NotFound);
+        }
+        let mut tx = state.store.pool().begin().await?;
+        automation::actor_context(&mut tx, organization_id, Some(principal.id), None).await?;
+        (
+            OrgAccess {
+                tx,
+                organization_id,
+                user_id: Uuid::nil(),
+                role: corqty_domain::rbac::Role::Runner,
+            },
+            RunOrigin {
+                user_id: None,
+                service_token_id: Some(principal.id),
+                trigger_id: None,
+                source: "api",
+            },
+            format!("token:{}", principal.id),
+        )
+    } else {
+        let Extension(session) = session.ok_or(ApiError::Unauthorized)?;
+        (
+            authorize(&state, &session, organization_id, Capability::RunWorkflows).await?,
+            RunOrigin::manual(session.user_id),
+            format!("user:{}", session.user_id),
+        )
+    };
+    let key = crate::automation::idempotency_key(&headers, false)?;
+    let route = format!("/workflows/{workflow_id}/runs");
+    let hash = Sha256::digest(serde_json::to_vec(&request).map_err(ApiError::internal)?);
+    if let Some(key) = &key {
+        match automation::check_idempotency(
+            &mut access.tx,
+            organization_id,
+            &route,
+            &actor,
+            key,
+            &hash,
+        )
+        .await?
+        {
+            automation::Idempotency::Fresh => {}
+            automation::Idempotency::Conflict => {
+                return Err(ApiError::Conflict("idempotency_conflict"));
+            }
+            automation::Idempotency::Replay(id) => {
+                let run = runs::get_run(&mut access.tx, id)
+                    .await?
+                    .ok_or(ApiError::NotFound)?;
+                access.commit().await?;
+                return Ok((StatusCode::OK, Json(run)));
+            }
+        }
+    }
     let input = Value::Object(request.input);
-    if input.to_string().len() > MAX_RUN_INPUT_BYTES {
+    if input.to_string().len() > crate::limits::run_input_bytes() {
         return Err(ApiError::Validation("run_input_too_large"));
     }
     let workflow = workflows::get_workflow(&mut access.tx, workflow_id)
@@ -80,7 +142,28 @@ pub async fn start_run(
         .version
         .or(workflow.published_version)
         .ok_or(ApiError::Conflict("workflow_not_published"))?;
-    let run = create(&state, &mut access, workflow_id, version, input, None).await?;
+    let run = create_with_origin(
+        &state,
+        &mut access,
+        workflow_id,
+        version,
+        input,
+        None,
+        &origin,
+    )
+    .await?;
+    if let Some(key) = &key {
+        automation::record_idempotency(
+            &mut access.tx,
+            organization_id,
+            &route,
+            &actor,
+            key,
+            &hash,
+            run.summary.id,
+        )
+        .await?;
+    }
     access.commit().await?;
     Ok((StatusCode::CREATED, Json(run)))
 }
@@ -168,6 +251,31 @@ async fn create(
     input: Value,
     rerun_of: Option<Uuid>,
 ) -> Result<RunRecord, ApiError> {
+    let origin = RunOrigin::manual(access.user_id);
+    create_with_origin(
+        state,
+        access,
+        workflow_id,
+        version,
+        input,
+        rerun_of,
+        &origin,
+    )
+    .await
+}
+
+pub(crate) async fn create_with_origin(
+    state: &AppState,
+    access: &mut OrgAccess,
+    workflow_id: Uuid,
+    version: i32,
+    input: Value,
+    rerun_of: Option<Uuid>,
+    origin: &RunOrigin,
+) -> Result<RunRecord, ApiError> {
+    if input.to_string().len() > crate::limits::run_input_bytes() {
+        return Err(ApiError::Validation("run_input_too_large"));
+    }
     let version = workflows::get_version(&mut access.tx, workflow_id, version)
         .await?
         .ok_or(ApiError::NotFound)?;
@@ -184,6 +292,20 @@ async fn create(
         });
     }
     let definitions = catalog::definitions_map(&mut access.tx).await?;
+    let mut plugin_diagnostics = Vec::new();
+    crate::plugins::validate_runtime_graph(
+        &mut access.tx,
+        &version.graph,
+        &definitions,
+        &mut plugin_diagnostics,
+    )
+    .await?;
+    if !plugin_diagnostics.is_empty() {
+        return Err(ApiError::Invalid {
+            code: "executor_disabled",
+            diagnostics: plugin_diagnostics,
+        });
+    }
     // ponytail: no row lock, so a run that starts while an admin disables shell counts as
     // started just before; disabling never touches existing runs anyway.
     if !shell_allowed(state, access).await? {
@@ -197,7 +319,7 @@ async fn create(
     }
     let nodes = plan_run(&version.graph, &definitions)
         .ok_or_else(|| ApiError::internal("a published version has no run plan"))?;
-    let run = runs::create_run(
+    let run = runs::create_run_with_origin(
         &mut access.tx,
         &NewRun {
             organization_id: access.organization_id,
@@ -209,6 +331,7 @@ async fn create(
             nodes: &nodes,
             rerun_of,
         },
+        origin,
     )
     .await?;
     runs::get_run(&mut access.tx, run.id)
@@ -217,7 +340,7 @@ async fn create(
 }
 
 /// Where and how `input` breaks `schema`, one diagnostic per error.
-fn input_diagnostics(schema: &Value, input: &Value) -> Result<Vec<Diagnostic>, String> {
+pub(crate) fn input_diagnostics(schema: &Value, input: &Value) -> Result<Vec<Diagnostic>, String> {
     let validator = compile(schema)?;
     Ok(instance_errors(&validator, input)
         .into_iter()

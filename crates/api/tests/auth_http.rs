@@ -64,6 +64,7 @@ async fn register_sets_session_and_me_authenticates_it() {
             "edit_workflows",
             "publish_workflows",
             "run_workflows",
+            "manage_triggers",
             "manage_members",
             "manage_service_tokens",
             "manage_secrets",

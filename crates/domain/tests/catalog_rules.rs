@@ -8,6 +8,35 @@ use corqty_domain::{
 };
 use serde_json::{Value, json};
 
+#[test]
+fn known_secret_defaults_are_resolved_before_the_diagnostic_cap() {
+    use corqty_domain::catalog::validate_new_definition_with_resources;
+    use std::collections::HashSet;
+    let id = uuid::Uuid::new_v4();
+    let mut value = definition();
+    for index in 0..300 {
+        let field = format!("t{index}");
+        value["configSchema"]["properties"][&field] = json!({"type":"object"});
+        value["uiSchema"][&field] = json!({"widget":"secretReference"});
+        value["defaults"][&field] = json!({"kind":"secret","secretId":id});
+    }
+    let parsed = serde_json::from_value(value.clone()).unwrap();
+    assert!(
+        validate_new_definition_with_resources(&parsed, &HashSet::new(), &HashSet::from([id]))
+            .is_empty()
+    );
+    value["defaults"]["t299"] = json!({"plaintext":"invalid"});
+    let errors = validate_new_definition_with_resources(
+        &serde_json::from_value(value).unwrap(),
+        &HashSet::new(),
+        &HashSet::from([id]),
+    );
+    assert_eq!(
+        codes(&errors),
+        [("invalid_secret_reference", "/defaults/t299")]
+    );
+}
+
 /// An organization definition that passes every rule, with a config field for each widget
 /// that has extra rules.
 fn definition() -> Value {

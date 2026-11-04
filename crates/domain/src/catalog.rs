@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use jsonschema::Validator;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use crate::{
     diagnostic::{Diagnostic, MAX_DIAGNOSTICS, capped, pointer_token},
@@ -23,7 +24,7 @@ pub const WIDGETS: [&str; 10] = [
     "keyValue",
     "fileText",
 ];
-// ponytail: the executors compiled into every worker; Milestone 4 adds installed plugins.
+// Runtime executor identities are supplied by the organization's validated plugin catalog.
 pub const BUILTIN_EXECUTORS: &[(&str, &str)] = &[("mock", "1.0.0"), ("shell", "1.0.0")];
 pub const FILE_TEXT_MAX_BYTES: usize = 262_144;
 /// The most input ports, and the most output ports, one definition can have.
@@ -86,6 +87,15 @@ pub struct NewNodeDefinition {
 /// Every problem in a new organization definition, with pointers into the request body.
 #[must_use]
 pub fn validate_new_definition(definition: &NewNodeDefinition) -> Vec<Diagnostic> {
+    validate_new_definition_with_resources(definition, &HashSet::new(), &HashSet::new())
+}
+
+#[must_use]
+pub fn validate_new_definition_with_resources(
+    definition: &NewNodeDefinition,
+    executors: &HashSet<(String, String)>,
+    secrets: &HashSet<Uuid>,
+) -> Vec<Diagnostic> {
     let mut diagnostics = validate_blueprint_metadata(
         &definition.key,
         &definition.display_name,
@@ -98,7 +108,11 @@ pub fn validate_new_definition(definition: &NewNodeDefinition) -> Vec<Diagnostic
             "A category must have 1 to 60 characters.",
         ));
     }
-    diagnostics.extend(validate_spec(&definition.spec));
+    diagnostics.extend(validate_spec_with_resources(
+        &definition.spec,
+        executors,
+        secrets,
+    ));
     capped(diagnostics)
 }
 
@@ -153,6 +167,15 @@ pub fn validate_blueprint_metadata(
 /// to the definition, whose top level holds the spec fields.
 #[must_use]
 pub fn validate_spec(spec: &NodeDefinitionSpec) -> Vec<Diagnostic> {
+    validate_spec_with_resources(spec, &HashSet::new(), &HashSet::new())
+}
+
+#[must_use]
+pub fn validate_spec_with_resources(
+    spec: &NodeDefinitionSpec,
+    executors: &HashSet<(String, String)>,
+    secrets: &HashSet<Uuid>,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for (side, ports) in [("inputs", &spec.inputs), ("outputs", &spec.outputs)] {
         if ports.len() > MAX_PORTS {
@@ -254,13 +277,22 @@ pub fn validate_spec(spec: &NodeDefinitionSpec) -> Vec<Diagnostic> {
     }
 
     let executor = (spec.executor.key.as_str(), spec.executor.version.as_str());
-    if !BUILTIN_EXECUTORS.contains(&executor) {
+    if !BUILTIN_EXECUTORS.contains(&executor)
+        && !executors.contains(&(spec.executor.key.clone(), spec.executor.version.clone()))
+    {
         diagnostics.push(Diagnostic::new(
             "unknown_executor",
             "/executor",
             "The executor must be mock 1.0.0 or shell 1.0.0.",
         ));
     }
+    // Schema validation above already reports invalid defaults. Widget contracts also
+    // apply to stored defaults: an object is not necessarily an opaque secret reference.
+    diagnostics.extend(
+        validate_config_with_secrets(spec, &spec.defaults, "/defaults", secrets)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.code != "invalid_config"),
+    );
     diagnostics
 }
 
@@ -271,8 +303,18 @@ pub fn validate_config(
     config: &Value,
     pointer_prefix: &str,
 ) -> Vec<Diagnostic> {
+    validate_config_with_secrets(spec, config, pointer_prefix, &HashSet::new())
+}
+
+#[must_use]
+pub fn validate_config_with_secrets(
+    spec: &NodeDefinitionSpec,
+    config: &Value,
+    pointer_prefix: &str,
+    secrets: &HashSet<Uuid>,
+) -> Vec<Diagnostic> {
     let validator = compile(&spec.config_schema).ok();
-    validate_compiled_config(spec, validator.as_ref(), config, pointer_prefix)
+    validate_compiled_config_with_secrets(spec, validator.as_ref(), config, pointer_prefix, secrets)
 }
 
 /// `validate_config` with the config schema already compiled, so a graph compiles each
@@ -283,6 +325,17 @@ pub fn validate_compiled_config(
     validator: Option<&Validator>,
     config: &Value,
     pointer_prefix: &str,
+) -> Vec<Diagnostic> {
+    validate_compiled_config_with_secrets(spec, validator, config, pointer_prefix, &HashSet::new())
+}
+
+#[must_use]
+pub fn validate_compiled_config_with_secrets(
+    spec: &NodeDefinitionSpec,
+    validator: Option<&Validator>,
+    config: &Value,
+    pointer_prefix: &str,
+    secrets: &HashSet<Uuid>,
 ) -> Vec<Diagnostic> {
     let Some(validator) = validator else {
         return vec![Diagnostic::new(
@@ -316,7 +369,9 @@ pub fn validate_compiled_config(
             }
             "secretReference" if !value.is_null() => {
                 diagnostics.push(match InputBinding::deserialize(value) {
-                    // ponytail: no secrets until M4; replace with an org-scoped lookup then.
+                    Ok(InputBinding::Secret { secret_id }) if secrets.contains(&secret_id) => {
+                        continue;
+                    }
                     Ok(InputBinding::Secret { .. }) => Diagnostic::new(
                         "secret_not_found",
                         format!("{pointer}/secretId"),

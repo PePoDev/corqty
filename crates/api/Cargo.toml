@@ -10,8 +10,13 @@ argon2.workspace = true
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
+chrono-tz = "0.10"
+cron = "0.15"
+hmac = "0.12"
 corqty-domain = { path = "../domain" }
 corqty-persistence = { path = "../persistence" }
+corqty-plugin-host = { path = "../plugin-host" }
+corqty-plugin-sdk = { path = "../plugin-sdk" }
 futures-util.workspace = true
 getrandom.workspace = true
 serde.workspace = true

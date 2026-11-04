@@ -20,6 +20,7 @@ pub enum Capability {
     EditWorkflows,
     PublishWorkflows,
     RunWorkflows,
+    ManageTriggers,
     ManageMembers,
     ManageServiceTokens,
     ManageSecrets,
@@ -28,11 +29,12 @@ pub enum Capability {
 }
 
 impl Capability {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::ViewOrganization,
         Self::EditWorkflows,
         Self::PublishWorkflows,
         Self::RunWorkflows,
+        Self::ManageTriggers,
         Self::ManageMembers,
         Self::ManageServiceTokens,
         Self::ManageSecrets,
@@ -52,6 +54,7 @@ impl Role {
                     | Capability::EditWorkflows
                     | Capability::PublishWorkflows
                     | Capability::RunWorkflows
+                    | Capability::ManageTriggers
             ),
             Self::Runner => matches!(
                 capability,

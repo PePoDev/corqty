@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
+use uuid::Uuid;
 
 use crate::{
     catalog::{NodeDefinitionSpec, PortSpec},
@@ -8,7 +9,7 @@ use crate::{
     schema::{compile, instance_errors},
 };
 
-// ponytail: fixed limits until Milestone 5 makes them deployment configuration.
+// Hard ceilings. Deployment configuration can lower these limits.
 /// The largest run input, as serialized JSON.
 pub const MAX_RUN_INPUT_BYTES: usize = 1_048_576;
 /// The largest inputs object one node gets, as serialized JSON.
@@ -55,12 +56,11 @@ pub fn resolve_inputs(
                 .and_then(|output| output.get(&edge.source.port)),
             (None, Some(InputBinding::Literal { value })) => Some(value),
             (None, Some(InputBinding::WorkflowInput { pointer })) => run_input.pointer(pointer),
-            // ponytail: no secrets until M4, and publish rejects secret bindings until then.
             (None, Some(InputBinding::Secret { .. })) => {
                 return Err(NodeFailure::new(
                     "secret_unavailable",
                     format!(
-                        "The input \"{}\" needs a secret, which workers cannot read yet.",
+                        "The secret bound to input \"{}\" is unavailable.",
                         port.name
                     ),
                 ));
@@ -81,10 +81,11 @@ pub fn resolve_inputs(
         }
     }
     // Before validation, so validating costs at most one limit's worth of JSON.
-    if json_bytes(&inputs) > MAX_NODE_INPUT_BYTES {
+    let limit = crate::limits::Limits::deployment().node_input_bytes;
+    if json_bytes(&inputs) > limit {
         return Err(NodeFailure::new(
             "input_too_large",
-            format!("The inputs have more than {MAX_NODE_INPUT_BYTES} bytes of JSON."),
+            format!("The inputs have more than {limit} bytes of JSON."),
         ));
     }
     let problem = spec
@@ -97,6 +98,33 @@ pub fn resolve_inputs(
     }
 }
 
+/// Resolves and validates plaintext only in the worker. The worker replaces bindings with
+/// opaque references before invoking a runtime guest and redacts all persisted views.
+pub fn resolve_inputs_with_secrets(
+    node: &GraphNode,
+    spec: &NodeDefinitionSpec,
+    graph: &GraphSnapshot,
+    run_input: &Value,
+    upstream_outputs: &HashMap<String, Map<String, Value>>,
+    secrets: &HashMap<Uuid, String>,
+) -> Result<Map<String, Value>, NodeFailure> {
+    let mut resolved = node.clone();
+    for binding in resolved.inputs.values_mut() {
+        if let InputBinding::Secret { secret_id } = binding {
+            let value = secrets.get(secret_id).ok_or_else(|| {
+                NodeFailure::new(
+                    "secret_unavailable",
+                    "A bound secret is unavailable.".to_owned(),
+                )
+            })?;
+            *binding = InputBinding::Literal {
+                value: Value::String(value.clone()),
+            };
+        }
+    }
+    resolve_inputs(&resolved, spec, graph, run_input, upstream_outputs)
+}
+
 /// Checks what an executor returned: at most `MAX_NODE_OUTPUT_BYTES` of JSON, only declared
 /// output ports, no U+0000 anywhere (jsonb cannot store it), and each value matching its
 /// port's schema. Declared outputs may be missing.
@@ -104,10 +132,11 @@ pub fn validate_output(
     spec: &NodeDefinitionSpec,
     output: &Map<String, Value>,
 ) -> Result<(), NodeFailure> {
-    if json_bytes(output) > MAX_NODE_OUTPUT_BYTES {
+    let limit = crate::limits::Limits::deployment().node_output_bytes;
+    if json_bytes(output) > limit {
         return Err(NodeFailure::new(
             "output_too_large",
-            format!("The output has more than {MAX_NODE_OUTPUT_BYTES} bytes of JSON."),
+            format!("The output has more than {limit} bytes of JSON."),
         ));
     }
     if let Some(name) = output

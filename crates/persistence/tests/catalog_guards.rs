@@ -142,10 +142,12 @@ async fn the_worker_role_executes_only_the_worker_functions() {
         functions,
         [
             "append_node_log",
+            "bound_secrets",
             "claim_node_runs",
             "complete_node_run",
             "heartbeat",
             "register_worker",
+            "runtime_plugin",
             "start_node_run",
         ]
     );

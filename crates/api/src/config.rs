@@ -1,5 +1,6 @@
 #[derive(Clone)]
 pub struct ApiConfig {
+    pub master_key: corqty_domain::secrets::MasterKey,
     pub bind_address: String,
     pub database_url: String,
     pub public_web_url: String,
@@ -11,8 +12,10 @@ pub struct ApiConfig {
 }
 
 impl ApiConfig {
-    pub fn from_env() -> Result<Self, std::env::VarError> {
+    pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
+        corqty_domain::limits::Limits::from_env()?;
         Ok(Self {
+            master_key: corqty_domain::secrets::MasterKey::from_env()?,
             bind_address: std::env::var("CORQTY_BIND_ADDRESS")
                 .unwrap_or_else(|_| "0.0.0.0:8080".to_owned()),
             database_url: std::env::var("DATABASE_URL_API")?,
@@ -29,6 +32,7 @@ impl ApiConfig {
     #[must_use]
     pub fn for_tests() -> Self {
         Self {
+            master_key: corqty_domain::secrets::MasterKey::from_bytes([7; 32]),
             bind_address: "127.0.0.1:0".to_owned(),
             database_url: String::new(),
             public_web_url: "http://localhost:3000".to_owned(),

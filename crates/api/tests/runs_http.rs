@@ -437,19 +437,19 @@ async fn reruns_copy_the_input_and_default_to_the_source_version() {
                 runner.user_id,
                 "run.started",
                 latest["id"],
-                { "runId": latest["id"], "version": 2 },
+                { "runId": latest["id"], "version": 2, "source": "manual" },
             ]),
             json!([
                 runner.user_id,
                 "run.rerun",
                 rerun["id"],
-                { "runId": rerun["id"], "sourceRunId": first["id"], "version": 1 },
+                { "runId": rerun["id"], "sourceRunId": first["id"], "version": 1, "source": "manual" },
             ]),
             json!([
                 runner.user_id,
                 "run.started",
                 first["id"],
-                { "runId": first["id"], "version": 1 },
+                { "runId": first["id"], "version": 1, "source": "manual" },
             ]),
         ]
     );
@@ -535,7 +535,7 @@ async fn cancel_ends_a_queued_run_once() {
                 runner.user_id,
                 "run.started",
                 run["id"],
-                { "runId": run["id"], "version": 1 },
+                { "runId": run["id"], "version": 1, "source": "manual" },
             ]),
         ]
     );
@@ -597,7 +597,7 @@ async fn a_cancel_that_deadlocks_is_tried_again() {
                 admin.user_id,
                 "run.started",
                 run["id"],
-                { "runId": run["id"], "version": 1 },
+                { "runId": run["id"], "version": 1, "source": "manual" },
             ]),
         ]
     );

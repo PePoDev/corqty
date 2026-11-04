@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use corqty_domain::{
     diagnostic::Diagnostic,
     graph::{GraphSnapshot, check_limits},
-    publish::{Definitions, canonical_checksum, shell_diagnostics, validate_graph},
+    publish::{Definitions, canonical_checksum, shell_diagnostics, validate_graph_with_resources},
     rbac::Capability,
     slug::slugify,
 };
@@ -183,10 +183,20 @@ pub async fn validate(
     }
     let shell_enabled = shell_allowed(&state, &mut access).await?;
     let definitions = catalog::definitions_map(&mut access.tx).await?;
-    let (_, diagnostics) = blocking(body.graph, move |graph| {
-        publish_diagnostics(graph, &definitions, shell_enabled)
+    let secret_ids = corqty_persistence::secrets::ids(&mut access.tx).await?;
+    let executors = corqty_persistence::plugins::enabled_identities(&mut access.tx).await?;
+    let validation_definitions = definitions.clone();
+    let (graph, mut diagnostics) = blocking(body.graph, move |graph| {
+        publish_diagnostics(
+            graph,
+            &validation_definitions,
+            shell_enabled,
+            &executors,
+            &secret_ids,
+        )
     })
     .await?;
+    resolve_catalog_diagnostics(&mut access.tx, &graph, &definitions, &mut diagnostics).await?;
     access.commit().await?;
     Ok(Json(json!({
         "valid": diagnostics.is_empty(),
@@ -241,10 +251,20 @@ pub async fn publish(
     }
     let shell_enabled = shell_allowed(&state, &mut access).await?;
     let definitions = catalog::definitions_map(&mut access.tx).await?;
-    let (graph, diagnostics) = blocking(draft.graph, move |graph| {
-        publish_diagnostics(graph, &definitions, shell_enabled)
+    let secret_ids = corqty_persistence::secrets::ids(&mut access.tx).await?;
+    let executors = corqty_persistence::plugins::enabled_identities(&mut access.tx).await?;
+    let validation_definitions = definitions.clone();
+    let (graph, mut diagnostics) = blocking(draft.graph, move |graph| {
+        publish_diagnostics(
+            graph,
+            &validation_definitions,
+            shell_enabled,
+            &executors,
+            &secret_ids,
+        )
     })
     .await?;
+    resolve_catalog_diagnostics(&mut access.tx, &graph, &definitions, &mut diagnostics).await?;
     if !diagnostics.is_empty() {
         return Err(ApiError::Invalid {
             code: "graph_invalid",
@@ -291,12 +311,23 @@ fn publish_diagnostics(
     graph: &GraphSnapshot,
     definitions: &Definitions,
     shell_enabled: bool,
+    executors: &HashSet<(String, String)>,
+    secrets: &HashSet<Uuid>,
 ) -> Vec<Diagnostic> {
-    let mut diagnostics = validate_graph(graph, definitions);
+    let mut diagnostics = validate_graph_with_resources(graph, definitions, executors, secrets);
     if !shell_enabled {
         diagnostics.extend(shell_diagnostics(graph, definitions));
     }
     diagnostics
+}
+
+pub(crate) async fn resolve_catalog_diagnostics(
+    conn: &mut sqlx::PgConnection,
+    graph: &GraphSnapshot,
+    definitions: &Definitions,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), ApiError> {
+    crate::plugins::validate_runtime_graph(conn, graph, definitions, diagnostics).await
 }
 
 /// The unique key that keeps a draft revision from becoming two versions. The workflow

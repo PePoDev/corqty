@@ -22,6 +22,96 @@ use sqlx::{Postgres, Transaction, postgres::PgPoolOptions};
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
+#[tokio::test]
+#[serial]
+async fn bound_secrets_require_the_exact_live_lease_and_cannot_escape_its_tenant_or_node() {
+    use corqty_domain::{graph::InputBinding, secrets::MasterKey};
+    use corqty_persistence::secrets::{self, SecretWrite};
+    let fixture = Fixture::new().await;
+    let key = MasterKey::from_bytes([7; 32]);
+    let (bound, other, foreign) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    for (tenant, id) in [(fixture.a, bound), (fixture.a, other), (fixture.b, foreign)] {
+        let encrypted = key
+            .encrypt(tenant.organization_id, id, "sensitive-value")
+            .unwrap();
+        let mut tx = fixture.tx(tenant).await;
+        secrets::create(
+            &mut tx,
+            &SecretWrite {
+                id,
+                organization_id: tenant.organization_id,
+                actor: tenant.admin,
+                name: &id.to_string(),
+                encrypted: &encrypted,
+            },
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+    let mut graph = fixture.infrastructure().await;
+    graph.nodes[0]
+        .inputs
+        .insert("region".into(), InputBinding::Secret { secret_id: bound });
+    // A malicious graph bypassing publish still must not expose a foreign ciphertext.
+    graph.nodes[0].config["foreign"] = json!({"kind":"secret", "secretId":foreign});
+    let published = fixture.publish(fixture.a, &graph).await;
+    fixture.run(&published, &published.plan).await;
+    let worker = fixture.worker(&["mock@1.0.0"]).await;
+    let intruder = fixture.worker(&["mock@1.0.0"]).await;
+    let claim = worker.claim(1, 30).await.unwrap().remove(0);
+    assert!(
+        intruder
+            .bound_secrets(claim.node_run_id, claim.lease_token)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        worker
+            .bound_secrets(claim.node_run_id, claim.lease_token + 1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let records = worker
+        .bound_secrets(claim.node_run_id, claim.lease_token)
+        .await
+        .unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].id, bound);
+    assert_eq!(
+        key.decrypt(fixture.a.organization_id, bound, &records[0].encrypted())
+            .unwrap(),
+        "sensitive-value"
+    );
+    let mut tx = fixture.tx(fixture.a).await;
+    let error = sqlx::query_scalar::<_, Vec<u8>>("SELECT ciphertext FROM secrets WHERE id=$1")
+        .bind(bound)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap_err();
+    assert_eq!(error.as_database_error().unwrap().code().unwrap(), "42501");
+    tx.rollback().await.unwrap();
+    assert!(
+        sqlx::query("SELECT * FROM secrets")
+            .execute(&fixture.database.worker)
+            .await
+            .is_err()
+    );
+    worker
+        .complete(claim.node_run_id, claim.lease_token, &Outcome::Canceled)
+        .await
+        .unwrap();
+    assert!(
+        worker
+            .bound_secrets(claim.node_run_id, claim.lease_token)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
 /// An organization and its admin, who may edit and run workflows.
 #[derive(Clone, Copy)]
 struct Tenant {

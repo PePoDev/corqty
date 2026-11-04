@@ -1,9 +1,11 @@
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use corqty_domain::{
-    catalog::{NewNodeDefinition, validate_blueprint_metadata, validate_new_definition},
+    catalog::{
+        NewNodeDefinition, validate_blueprint_metadata, validate_new_definition_with_resources,
+    },
     diagnostic::Diagnostic,
     graph::GraphSnapshot,
-    publish::validate_graph,
+    publish::validate_graph_with_resources,
     rbac::Capability,
 };
 use corqty_persistence::{
@@ -61,7 +63,20 @@ pub async fn create_node_definition(
 ) -> Result<(StatusCode, Json<NodeDefinitionRecord>), ApiError> {
     let mut access =
         authorize(&state, &session, organization_id, Capability::EditWorkflows).await?;
-    let (definition, diagnostics) = blocking(definition, validate_new_definition).await?;
+    let secret_ids = corqty_persistence::secrets::ids(&mut access.tx).await?;
+    let executors = corqty_persistence::plugins::enabled_identities(&mut access.tx).await?;
+    let (definition, mut diagnostics) = blocking(definition, move |definition| {
+        validate_new_definition_with_resources(definition, &executors, &secret_ids)
+    })
+    .await?;
+    crate::plugins::validate_runtime_config(
+        &mut access.tx,
+        &definition.spec,
+        &definition.spec.defaults,
+        "",
+        &mut diagnostics,
+    )
+    .await?;
     if !diagnostics.is_empty() {
         return Err(ApiError::Invalid {
             code: "node_definition_invalid",
@@ -133,9 +148,24 @@ pub async fn create_blueprint(
         &blueprint.description,
     );
     let definitions = catalog::definitions_map(&mut access.tx).await?;
-    let (blueprint, graph_diagnostics) = blocking(blueprint, move |blueprint| {
-        validate_graph(&blueprint.graph, &definitions)
+    let secret_ids = corqty_persistence::secrets::ids(&mut access.tx).await?;
+    let executors = corqty_persistence::plugins::enabled_identities(&mut access.tx).await?;
+    let validation_definitions = definitions.clone();
+    let (blueprint, mut graph_diagnostics) = blocking(blueprint, move |blueprint| {
+        validate_graph_with_resources(
+            &blueprint.graph,
+            &validation_definitions,
+            &executors,
+            &secret_ids,
+        )
     })
+    .await?;
+    crate::workflows::resolve_catalog_diagnostics(
+        &mut access.tx,
+        &blueprint.graph,
+        &definitions,
+        &mut graph_diagnostics,
+    )
     .await?;
     diagnostics.extend(graph_diagnostics.into_iter().map(|diagnostic| Diagnostic {
         pointer: format!("/graph{}", diagnostic.pointer),

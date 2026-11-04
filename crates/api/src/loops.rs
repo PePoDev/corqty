@@ -31,5 +31,34 @@ pub fn spawn(state: &AppState) -> JoinSet<()> {
             }
         }
     });
+    let cron_state = state.clone();
+    loops.spawn(async move {
+        loop {
+            if let Err(error) =
+                crate::automation::dispatch_due(&cron_state, chrono::Utc::now()).await
+            {
+                tracing::warn!(error = %error, "cron dispatch failed");
+            }
+            tokio::select! {
+                () = cron_state.shutdown.cancelled() => break,
+                () = tokio::time::sleep(Duration::from_secs(15)) => {}
+            }
+        }
+    });
+    let retention_state = state.clone();
+    loops.spawn(async move {
+        loop {
+            if let Err(error) = sqlx::query("SELECT corqty.retain_runs()")
+                .execute(retention_state.store.pool())
+                .await
+            {
+                tracing::warn!(error = %error, "run retention failed");
+            }
+            tokio::select! {
+                () = retention_state.shutdown.cancelled() => break,
+                () = tokio::time::sleep(Duration::from_secs(3600)) => {}
+            }
+        }
+    });
     loops
 }

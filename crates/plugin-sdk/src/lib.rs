@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
-//! The logical contract between the worker and an executor (spec §10.1). Milestone 3 compiles
-//! executors into the worker; Milestone 4 runtime plugins implement the same operations.
+//! The logical contract between the worker and an executor (spec §10.1).
+//! Compiled executors and runtime components implement the same operations.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -12,6 +13,7 @@ use serde_json::{Map, Value};
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 /// The host contract version this worker implements.
 pub const HOST_CONTRACT: &str = "1";
@@ -55,8 +57,10 @@ pub struct ExecuteRequest {
 }
 
 /// What the host lends an executor for one attempt.
-#[derive(Debug)]
 pub struct ExecutionContext {
+    /// Values explicitly bound to this attempt. Runtime guests can access these only via
+    /// the approved secret-read host capability; these are never serialized.
+    pub bound_secrets: HashMap<Uuid, String>,
     /// Fired by the worker on a deadline, a user cancel or shutdown. The executor then returns
     /// an `ExecutorError` with code `canceled` promptly.
     pub cancel: CancellationToken,
@@ -65,6 +69,21 @@ pub struct ExecutionContext {
     /// A bounded channel: `send(..).await` waits while the worker catches up. Executors ignore
     /// a closed channel.
     pub logs: Sender<LogChunk>,
+}
+
+impl std::fmt::Debug for ExecutionContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutionContext")
+            .field("bound_secrets", &"[REDACTED]")
+            .field("scratch_dir", &self.scratch_dir)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for ExecutionContext {
+    fn drop(&mut self) {
+        self.bound_secrets.values_mut().for_each(Zeroize::zeroize);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

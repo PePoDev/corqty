@@ -3,13 +3,17 @@ use std::collections::{HashMap, HashSet};
 use jsonschema::Validator;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 use crate::{
-    catalog::{BUILTIN_EXECUTORS, NodeDefinitionSpec, PortSpec, fits, validate_compiled_config},
+    catalog::{
+        BUILTIN_EXECUTORS, NodeDefinitionSpec, PortSpec, fits,
+        validate_compiled_config_with_secrets,
+    },
     diagnostic::{Diagnostic, MAX_DIAGNOSTICS, capped, pointer_token},
     graph::{
-        GRAPH_SCHEMA_VERSION, GraphSnapshot, InputBinding, MAX_ATTEMPTS, MAX_TIMEOUT_SECONDS,
-        check_limits, compatible, has_cycle,
+        GRAPH_SCHEMA_VERSION, GraphSnapshot, InputBinding, MAX_ATTEMPTS, check_limits, compatible,
+        has_cycle,
     },
     schema::{compile, compile_at, instance_errors},
 };
@@ -23,6 +27,18 @@ pub type Definitions = HashMap<(String, i32), NodeDefinitionSpec>;
 /// that depend on it, so nothing cascades.
 #[must_use]
 pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<Diagnostic> {
+    validate_graph_with_resources(graph, definitions, &HashSet::new(), &HashSet::new())
+}
+
+/// Resources are read and locked in the tenant transaction before validation. Known
+/// references do not consume diagnostic capacity, so large valid graphs are checked fully.
+#[must_use]
+pub fn validate_graph_with_resources(
+    graph: &GraphSnapshot,
+    definitions: &Definitions,
+    executors: &HashSet<(String, String)>,
+    secrets: &HashSet<Uuid>,
+) -> Vec<Diagnostic> {
     let mut diagnostics = check_limits(graph);
     if !diagnostics.is_empty() {
         // Nothing else is checked, so the work below stays bounded by the limits.
@@ -185,11 +201,12 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
                 format!("A node can run 1 to {MAX_ATTEMPTS} times."),
             ));
         }
-        if !(1..=MAX_TIMEOUT_SECONDS).contains(&node.timeout_seconds) {
+        let max_timeout = crate::limits::Limits::deployment().max_timeout_seconds;
+        if !(1..=max_timeout).contains(&node.timeout_seconds) {
             diagnostics.push(Diagnostic::new(
                 "invalid_timeout",
                 format!("{pointer}/timeoutSeconds"),
-                format!("A timeout must be 1 to {MAX_TIMEOUT_SECONDS} seconds."),
+                format!("A timeout must be 1 to {max_timeout} seconds."),
             ));
         }
         let reference = (node.definition.key.clone(), node.definition.version);
@@ -202,7 +219,9 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
             continue;
         };
         let executor = (spec.executor.key.as_str(), spec.executor.version.as_str());
-        if !BUILTIN_EXECUTORS.contains(&executor) {
+        if !BUILTIN_EXECUTORS.contains(&executor)
+            && !executors.contains(&(spec.executor.key.clone(), spec.executor.version.clone()))
+        {
             diagnostics.push(Diagnostic::new(
                 "unknown_executor",
                 format!("{pointer}/definition"),
@@ -213,11 +232,12 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
         let validator = config_validators
             .entry((key, version))
             .or_insert_with(|| compile(&spec.config_schema).ok());
-        diagnostics.extend(validate_compiled_config(
+        diagnostics.extend(validate_compiled_config_with_secrets(
             spec,
             validator.as_ref(),
             &node.config,
             &format!("{pointer}/config"),
+            secrets,
         ));
 
         for (name, binding) in &node.inputs {
@@ -262,7 +282,7 @@ pub fn validate_graph(graph: &GraphSnapshot, definitions: &Definitions) -> Vec<D
                         ));
                     }
                 }
-                // ponytail: no secrets until M4; replace with an org-scoped lookup then.
+                InputBinding::Secret { secret_id } if secrets.contains(secret_id) => {}
                 InputBinding::Secret { .. } => diagnostics.push(Diagnostic::new(
                     "secret_not_found",
                     format!("{at}/secretId"),

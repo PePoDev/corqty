@@ -10,15 +10,53 @@ use tracing::Level;
 use crate::{
     audit,
     auth::{handlers, middleware as auth_middleware},
-    catalog,
+    automation, catalog,
     error::ApiError,
-    events, organizations, runs,
+    events, organizations, plugins, runs, secrets,
     state::AppState,
     workflows,
 };
 
 pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
+        .route(
+            "/orgs/{organization_id}/secrets",
+            get(secrets::list).post(secrets::create),
+        )
+        .route(
+            "/orgs/{organization_id}/secrets/{secret_id}",
+            put(secrets::update).delete(secrets::remove),
+        )
+        .route(
+            "/orgs/{organization_id}/plugins",
+            get(plugins::list)
+                .post(plugins::install)
+                .layer(axum::extract::DefaultBodyLimit::max(36 * 1024 * 1024)),
+        )
+        .route(
+            "/orgs/{organization_id}/plugins/{plugin_id}/approval",
+            put(plugins::approve),
+        )
+        .route(
+            "/orgs/{organization_id}/plugins/{plugin_id}/enabled",
+            put(plugins::set_enabled),
+        )
+        .route(
+            "/orgs/{organization_id}/service-tokens",
+            get(automation::list_tokens).post(automation::create_token),
+        )
+        .route(
+            "/orgs/{organization_id}/service-tokens/{token_id}",
+            axum::routing::delete(automation::revoke_token),
+        )
+        .route(
+            "/orgs/{organization_id}/triggers",
+            get(automation::list_triggers).post(automation::create_trigger),
+        )
+        .route(
+            "/orgs/{organization_id}/triggers/{trigger_id}",
+            put(automation::update_trigger).delete(automation::delete_trigger),
+        )
         .route("/auth/me", get(handlers::me))
         .route("/auth/logout", post(handlers::logout))
         .route("/organizations", post(organizations::handlers::create))
@@ -125,6 +163,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(|| async { StatusCode::NO_CONTENT }));
 
     Router::new()
+        .route(
+            "/hooks/v1/{trigger_id}",
+            post(automation::webhook).layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
+        )
         .nest("/api/v1", public.merge(protected))
         // `method_not_allowed_fallback` only reaches routes added before it.
         .fallback(|| async { ApiError::NotFound })
@@ -134,5 +176,9 @@ pub fn build_router(state: AppState) -> Router {
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            automation::rate_limit_requests,
+        ))
         .with_state(state)
 }

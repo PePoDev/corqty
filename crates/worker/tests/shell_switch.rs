@@ -26,6 +26,10 @@ async fn registered_executors(switch: Option<&str>) -> Vec<String> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_corqty-worker"));
     command
         .env("DATABASE_URL_WORKER", WORKER_URL)
+        .env(
+            "CORQTY_MASTER_KEY",
+            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        )
         .env_remove("CORQTY_SHELL_EXECUTOR")
         .env("TMPDIR", directory.path())
         .env("TMP", directory.path())

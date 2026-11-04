@@ -58,6 +58,7 @@ async fn run_in(
         chunks
     });
     let context = ExecutionContext {
+        bound_secrets: Default::default(),
         cancel,
         scratch_dir: scratch.path().to_owned(),
         logs,

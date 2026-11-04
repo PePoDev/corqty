@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::diagnostic::Diagnostic;
 
 pub const GRAPH_SCHEMA_VERSION: u32 = 1;
-// ponytail: fixed limits in M2; deployment configuration arrives in Milestone 5.
+// Hard ceilings; deployment limits may be lower.
 pub const MAX_NODES: usize = 500;
 pub const MAX_EDGES: usize = 1000;
 pub const DEFAULT_TIMEOUT_SECONDS: u32 = 900;
@@ -35,6 +35,7 @@ pub struct GraphNode {
     pub config: Value,
     pub inputs: BTreeMap<String, InputBinding>,
     pub retry: RetryPolicy,
+    #[serde(default = "default_timeout")]
     pub timeout_seconds: u32,
 }
 
@@ -180,20 +181,25 @@ pub fn topological_order(node_ids: &[&str], edges: &[(&str, &str)]) -> Option<Ve
 /// The size limits every stored graph must respect, checked before anything else.
 #[must_use]
 pub fn check_limits(graph: &GraphSnapshot) -> Vec<Diagnostic> {
+    let limits = crate::limits::Limits::deployment();
     let mut diagnostics = Vec::new();
-    if graph.nodes.len() > MAX_NODES {
+    if graph.nodes.len() > limits.nodes {
         diagnostics.push(Diagnostic::new(
             "too_many_nodes",
             "/nodes",
-            format!("A graph can have at most {MAX_NODES} nodes."),
+            format!("A graph can have at most {} nodes.", limits.nodes),
         ));
     }
-    if graph.edges.len() > MAX_EDGES {
+    if graph.edges.len() > limits.edges {
         diagnostics.push(Diagnostic::new(
             "too_many_edges",
             "/edges",
-            format!("A graph can have at most {MAX_EDGES} edges."),
+            format!("A graph can have at most {} edges.", limits.edges),
         ));
     }
     diagnostics
+}
+
+fn default_timeout() -> u32 {
+    crate::limits::Limits::deployment().default_timeout_seconds
 }

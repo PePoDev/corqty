@@ -1002,3 +1002,138 @@ async fn every_successful_claim_touches_the_alive_file() {
     assert!(check_alive(path).is_err());
     worker.stop().await;
 }
+
+struct SecretProbe(&'static str);
+
+impl Executor for SecretProbe {
+    fn metadata(&self) -> ExecutorMetadata {
+        MOCK.metadata()
+    }
+    fn validate(&self, config: &Value) -> Vec<Diagnostic> {
+        MOCK.validate(config)
+    }
+    fn execute<'a>(
+        &'a self,
+        request: ExecuteRequest,
+        context: &'a ExecutionContext,
+    ) -> BoxFuture<'a, Result<Map<String, Value>, ExecutorError>> {
+        Box::pin(async move {
+            let value = request.inputs["region"].as_str().unwrap();
+            assert_eq!(context.bound_secrets.len(), 1);
+            assert_eq!(value, context.bound_secrets.values().next().unwrap());
+            context
+                .logs
+                .send(LogChunk {
+                    stream: LogStream::Stdout,
+                    text: format!("token={}", &value[..5]),
+                })
+                .await
+                .unwrap();
+            // Force the worker's periodic log flush in between the two parts of a secret.
+            sleep(Duration::from_millis(650)).await;
+            context
+                .logs
+                .send(LogChunk {
+                    stream: LogStream::Stdout,
+                    text: format!("{} done", &value[5..]),
+                })
+                .await
+                .unwrap();
+            match self.0 {
+                "output" => Ok(Map::from_iter([(
+                    "vpcId".to_owned(),
+                    json!(format!("vpc-{value}")),
+                )])),
+                "error" => Err(ExecutorError {
+                    code: format!("failure_{value}"),
+                    message: format!("Rejected {value}"),
+                    retryable: false,
+                }),
+                _ => Ok(Map::from_iter([("vpcId".to_owned(), json!("vpc-safe"))])),
+            }
+        })
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn secrets_are_resolved_per_job_redacted_across_flushes_and_never_persisted() {
+    use corqty_domain::{graph::InputBinding, secrets::MasterKey};
+    use corqty_persistence::secrets::{self, SecretWrite};
+    let fixture = Fixture::new().await;
+    let key = MasterKey::from_bytes([7; 32]);
+    let secret_id = Uuid::new_v4();
+    let value = "secret-value-unique-🔐";
+    let mut tx = fixture.tx().await;
+    for (id, name, plaintext) in [
+        (secret_id, "Bound", value),
+        (Uuid::new_v4(), "Unbound", "must-not-be-readable"),
+    ] {
+        let encrypted = key.encrypt(fixture.organization_id, id, plaintext).unwrap();
+        secrets::create(
+            &mut tx,
+            &SecretWrite {
+                id,
+                organization_id: fixture.organization_id,
+                actor: fixture.admin,
+                name,
+                encrypted: &encrypted,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    tx.commit().await.unwrap();
+    let mut graph = fixture.blueprint(INFRASTRUCTURE).await;
+    graph.nodes.truncate(1);
+    graph.edges.clear();
+    graph.nodes[0]
+        .inputs
+        .insert("region".into(), InputBinding::Secret { secret_id });
+    graph.nodes[0].retry.max_attempts = 3;
+    let node_id = graph.nodes[0].id.clone();
+    for mode in ["success", "output", "error"] {
+        let run = fixture.run(&graph, json!({"region":"safe"})).await;
+        let worker = fixture.start(
+            WorkerConfig {
+                master_key: Some(key.clone()),
+                ..fixture.config(1)
+            },
+            vec![Arc::new(SecretProbe(mode))],
+        );
+        assert_eq!(
+            fixture.finished(run).await,
+            if mode == "success" {
+                "succeeded"
+            } else {
+                "failed"
+            }
+        );
+        worker.stop().await;
+        let nodes = fixture.nodes(run).await;
+        assert!(!nodes.to_string().contains(value));
+        assert_eq!(nodes[&node_id]["input"]["region"], "[REDACTED]");
+        assert_eq!(nodes[&node_id]["attempt"], 1);
+        if mode == "output" {
+            assert_eq!(nodes[&node_id]["error"]["code"], "secret_output_detected");
+            assert_eq!(nodes[&node_id]["error"]["retryable"], false);
+            assert!(nodes[&node_id]["output"].is_null());
+        }
+        let events = fixture.events(run).await;
+        assert!(!serde_json::to_string(&events).unwrap().contains(value));
+        let text: String = events
+            .iter()
+            .filter(|event| event["type"] == "node.log")
+            .filter_map(|event| event["text"].as_str())
+            .collect();
+        assert_eq!(text, "token=[REDACTED] done");
+    }
+    let used: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE action='secret.used' AND resource_id=$1",
+    )
+    .bind(secret_id.to_string())
+    .fetch_one(&fixture.database.owner)
+    .await
+    .unwrap();
+    assert_eq!(used, 3);
+}

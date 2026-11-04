@@ -48,6 +48,7 @@ fn request(attempt: u32, config: Value) -> ExecuteRequest {
 fn context() -> (ExecutionContext, mpsc::Receiver<LogChunk>) {
     let (logs, received) = mpsc::channel(64);
     let context = ExecutionContext {
+        bound_secrets: Default::default(),
         cancel: CancellationToken::new(),
         scratch_dir: std::env::temp_dir(),
         logs,

@@ -6,17 +6,27 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+corqty-domain = { path = "../domain" }
 corqty-plugin-sdk = { path = "../plugin-sdk" }
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+tokio-util.workspace = true
+uuid.workspace = true
+wasmtime = { version = "49.0.1", default-features = false, features = ["async", "component-model", "cranelift", "runtime", "std", "wat"] }
 thiserror.workspace = true
+zeroize = "1"
 
 [dev-dependencies]
 chrono.workspace = true
-corqty-domain = { path = "../domain" }
 futures-util.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
-tokio-util.workspace = true
-uuid.workspace = true
+tempfile.workspace = true
+wat = "1"
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
 
 [lints]
 workspace = true

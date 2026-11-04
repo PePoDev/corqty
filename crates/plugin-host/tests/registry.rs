@@ -168,6 +168,9 @@ fn versions_must_be_three_dot_separated_numbers() {
         "1.0.x",
         "1.0.+1",
         " 1.0.0",
+        "01.0.0",
+        "1.00.0",
+        "1.0.01",
     ] {
         assert_eq!(
             rejection(vec![executor("mock", version)]),
@@ -202,7 +205,7 @@ fn executors_built_for_another_host_contract_are_rejected() {
 }
 
 #[test]
-fn secret_and_network_capabilities_wait_for_milestone_four() {
+fn operator_installed_compiled_plugins_may_use_host_capabilities() {
     for capability in [
         Capability::SecretRead,
         Capability::Network {
@@ -210,17 +213,14 @@ fn secret_and_network_capabilities_wait_for_milestone_four() {
             port: 443,
         },
     ] {
-        assert_eq!(
-            rejection(vec![fake(
+        assert!(
+            Registry::new(vec![fake(
                 "mock",
                 "1.0.0",
                 HOST_CONTRACT,
                 vec![Capability::Log, capability.clone()]
-            )]),
-            RegistryError::UnsupportedCapability {
-                executor: "mock@1.0.0".to_owned(),
-                capability,
-            },
+            )])
+            .is_ok(),
         );
     }
 }
@@ -246,6 +246,7 @@ async fn a_found_executor_receives_the_request_and_streams_its_logs() {
         .expect("mock@1.0.0 is registered");
     let (logs, mut received) = mpsc::channel(64);
     let context = ExecutionContext {
+        bound_secrets: Default::default(),
         cancel: CancellationToken::new(),
         scratch_dir: std::env::temp_dir(),
         logs,

@@ -48,6 +48,7 @@ fn fixed_roles_match_the_approved_permission_matrix() {
         (Capability::EditWorkflows, [true, true, false, false]),
         (Capability::PublishWorkflows, [true, true, false, false]),
         (Capability::RunWorkflows, [true, true, true, false]),
+        (Capability::ManageTriggers, [true, true, false, false]),
         (Capability::ManageMembers, [true, false, false, false]),
         (Capability::ManageServiceTokens, [true, false, false, false]),
         (Capability::ManageSecrets, [true, false, false, false]),
@@ -70,6 +71,7 @@ fn roles_list_their_capabilities_in_matrix_order() {
             Capability::EditWorkflows,
             Capability::PublishWorkflows,
             Capability::RunWorkflows,
+            Capability::ManageTriggers,
         ]
     );
     assert_eq!(

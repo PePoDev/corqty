@@ -24,7 +24,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
     let database_url =
         std::env::var("DATABASE_URL_WORKER").map_err(|_| "DATABASE_URL_WORKER must be set")?;
-    let mut config = WorkerConfig::default();
+    corqty_domain::limits::Limits::from_env()?;
+    let mut config = WorkerConfig {
+        master_key: Some(corqty_domain::secrets::MasterKey::from_env()?),
+        ..WorkerConfig::default()
+    };
     if let Ok(capacity) = std::env::var("CORQTY_WORKER_CAPACITY") {
         config.capacity = capacity
             .parse()

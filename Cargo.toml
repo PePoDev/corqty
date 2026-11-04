@@ -31,7 +31,7 @@ nix = { version = "0.31", default-features = false, features = ["signal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-sqlx = { version = "0.8", features = ["chrono", "json", "migrate", "postgres", "runtime-tokio-rustls", "uuid"] }
+sqlx = { version = "0.8", default-features = false, features = ["chrono", "json", "macros", "migrate", "postgres", "runtime-tokio-rustls", "uuid"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
@@ -48,3 +48,11 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
+
+# Keep Wasmtime's dependency debug information from exhausting memory while
+# linking the integration-test binaries on ordinary developer/CI machines.
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+debug = 0

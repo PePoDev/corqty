@@ -93,11 +93,38 @@ pub async fn create_run(
     conn: &mut PgConnection,
     run: &NewRun<'_>,
 ) -> Result<RunSummaryRecord, sqlx::Error> {
+    create_run_with_origin(conn, run, &RunOrigin::manual(run.actor_user_id)).await
+}
+
+#[derive(Debug, Clone)]
+pub struct RunOrigin {
+    pub user_id: Option<Uuid>,
+    pub service_token_id: Option<Uuid>,
+    pub trigger_id: Option<Uuid>,
+    pub source: &'static str,
+}
+
+impl RunOrigin {
+    pub const fn manual(user_id: Uuid) -> Self {
+        Self {
+            user_id: Some(user_id),
+            service_token_id: None,
+            trigger_id: None,
+            source: "manual",
+        }
+    }
+}
+
+pub async fn create_run_with_origin(
+    conn: &mut PgConnection,
+    run: &NewRun<'_>,
+    origin: &RunOrigin,
+) -> Result<RunSummaryRecord, sqlx::Error> {
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO runs(
             organization_id, workflow_id, workflow_version_id, version, input, rerun_of,
-            created_by
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            created_by, trigger_source, service_token_id, trigger_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id",
     )
     .bind(run.organization_id)
@@ -106,17 +133,20 @@ pub async fn create_run(
     .bind(run.version)
     .bind(Json(run.input))
     .bind(run.rerun_of)
-    .bind(run.actor_user_id)
+    .bind(origin.user_id)
+    .bind(origin.source)
+    .bind(origin.service_token_id)
+    .bind(origin.trigger_id)
     .fetch_one(&mut *conn)
     .await?;
     sqlx::query(
         "INSERT INTO node_runs(
             organization_id, run_id, node_id, executor, state,
-            max_attempts, timeout_seconds, pending_parents, children
+            max_attempts, timeout_seconds, pending_parents, children, log_limit_bytes
          )
          SELECT $1, $2, node_id, executor,
                 CASE WHEN pending_parents = 0 THEN 'queued' ELSE 'blocked' END,
-                max_attempts, timeout_seconds, pending_parents, children
+                max_attempts, least(timeout_seconds, $5), pending_parents, children, $4
          FROM jsonb_to_recordset($3) AS node(
              node_id text, executor text, max_attempts integer, timeout_seconds integer,
              pending_parents integer, children text[]
@@ -125,6 +155,8 @@ pub async fn create_run(
     .bind(run.organization_id)
     .bind(id)
     .bind(Json(run.nodes))
+    .bind(corqty_domain::limits::Limits::deployment().log_bytes as i32)
+    .bind(corqty_domain::limits::Limits::deployment().max_timeout_seconds as i32)
     .execute(&mut *conn)
     .await?;
     append_run_event(conn, id, &json!({"type": "run.state", "state": "queued"})).await?;
@@ -136,11 +168,20 @@ pub async fn create_run(
             json!({"runId": id, "sourceRunId": source, "version": run.version}),
         ),
     };
-    audit(
+    let mut metadata = metadata;
+    metadata["source"] = json!(origin.source);
+    if let Some(id) = origin.service_token_id {
+        metadata["serviceTokenId"] = json!(id);
+    }
+    if let Some(id) = origin.trigger_id {
+        metadata["triggerId"] = json!(id);
+    }
+    crate::automation::audit_actor(
         conn,
         run.organization_id,
-        run.actor_user_id,
+        origin.user_id,
         action,
+        "run",
         id,
         metadata,
     )
@@ -189,11 +230,11 @@ pub async fn get_run(
     run.nodes = sqlx::query_as(
         "SELECT n.node_id, n.state, n.attempt, n.max_attempts, n.executor,
                 CASE WHEN n.state IN ('queued', 'retry_wait')
-                          AND NOT n.executor = ANY (live.executors)
+                          AND NOT corqty.has_compatible_worker(n.organization_id, n.executor)
                      THEN 'waiting_for_compatible_worker'
                 END AS queue_reason,
                 n.input, n.output, n.error, n.started_at, n.finished_at
-         FROM node_runs n, corqty.live_executors() AS live(executors)
+         FROM node_runs n
          WHERE n.run_id = $1
          ORDER BY n.id",
     )

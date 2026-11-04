@@ -6,6 +6,45 @@ use corqty_domain::{
 };
 use serde_json::{Value, json};
 
+#[test]
+fn resource_context_keeps_large_valid_graphs_below_the_diagnostic_cap_and_checks_the_tail() {
+    use corqty_domain::publish::validate_graph_with_resources;
+    use std::collections::HashSet;
+    use uuid::Uuid;
+    let secret = Uuid::new_v4();
+    let mut definitions = definitions();
+    let spec = definitions.get_mut(&("acme.vpc".to_owned(), 1)).unwrap();
+    spec.executor.key = "runtime-sample".into();
+    let executors = HashSet::from([("runtime-sample".to_owned(), "1.0.0".to_owned())]);
+    let secrets = HashSet::from([secret]);
+    let mut graph = GraphSnapshot::empty();
+    for index in 0..300 {
+        let mut value = node(&format!("n{index}"));
+        value["inputs"]["region"] = json!({"kind":"secret","secretId":secret});
+        value["config"]["token"] = json!({"kind":"secret","secretId":secret});
+        graph.nodes.push(serde_json::from_value(value).unwrap());
+    }
+    assert!(validate_graph_with_resources(&graph, &definitions, &executors, &secrets).is_empty());
+    graph.nodes[299].display_name.clear();
+    let errors = validate_graph_with_resources(&graph, &definitions, &executors, &secrets);
+    assert_eq!(
+        codes(&errors),
+        [("invalid_display_name", "/nodes/299/displayName")]
+    );
+    graph.nodes[299].display_name = "Again".into();
+    graph.nodes[299].config["token"]["secretId"] = json!(Uuid::new_v4());
+    let errors = validate_graph_with_resources(&graph, &definitions, &executors, &secrets);
+    assert_eq!(
+        codes(&errors),
+        [("secret_not_found", "/nodes/299/config/token/secretId")]
+    );
+    assert!(
+        validate_graph(&graph, &definitions)
+            .iter()
+            .any(|error| error.code == "too_many_diagnostics")
+    );
+}
+
 /// A VPC that also reports its subnet count, and a database that needs the VPC id, a size
 /// and a nullable label.
 fn definitions() -> Definitions {

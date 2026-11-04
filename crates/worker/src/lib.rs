@@ -4,17 +4,21 @@
 //! under a lease that it keeps renewing, and reports the attempt's logs and outcome. It
 //! reaches the database only through the worker role's `corqty` functions.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use chrono::{TimeDelta, Utc};
+use corqty_domain::graph::InputBinding;
 use corqty_domain::run::is_retryable;
 use corqty_domain::runtime::{
-    MAX_LOG_BYTES_PER_NODE_RUN, NodeFailure, resolve_inputs, validate_output,
+    MAX_LOG_BYTES_PER_NODE_RUN, NodeFailure, resolve_inputs_with_secrets, validate_output,
 };
+use corqty_domain::secrets::{MasterKey, Redactor, referenced_secret_ids};
 use corqty_persistence::worker_queue::{ClaimedJob, Job, NodeError, Outcome, WorkerDb};
 use corqty_plugin_host::Registry;
+use corqty_plugin_host::runtime::RuntimePlugin;
 use corqty_plugin_sdk::{
     ExecuteRequest, ExecutionContext, Executor, ExecutorError, LogChunk, LogStream,
 };
@@ -39,6 +43,8 @@ const ALIVE_MAX_AGE: Duration = Duration::from_secs(10);
 /// How a worker runs. `Default` holds the production values.
 #[derive(Clone, Debug)]
 pub struct WorkerConfig {
+    /// Required by the worker executable. Tests without secrets may leave it absent.
+    pub master_key: Option<MasterKey>,
     /// Keys the worker's leases and its `worker_instances` row: new for every process.
     pub worker_id: Uuid,
     /// How many attempts run at once.
@@ -64,6 +70,7 @@ pub struct WorkerConfig {
 impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
+            master_key: None,
             worker_id: Uuid::now_v7(),
             capacity: 4,
             lease_seconds: 30,
@@ -90,7 +97,8 @@ pub async fn run(
 ) -> Result<(), sqlx::Error> {
     let db = WorkerDb::new(pool, config.worker_id);
     let executors = registry.advertised();
-    retrying(|| db.register(&executors, config.capacity)).await?;
+    let contracts = [corqty_plugin_sdk::HOST_CONTRACT.to_owned()];
+    retrying(|| db.register_with_contracts(&executors, &contracts, config.capacity)).await?;
     let worker = Arc::new(Worker {
         config,
         registry,
@@ -181,6 +189,34 @@ enum Ended {
     Abandoned,
 }
 
+enum LoadedExecutor {
+    Compiled(Arc<dyn Executor>),
+    Runtime(RuntimePlugin),
+}
+
+type ExecutionFuture<'a> =
+    std::pin::Pin<Box<dyn Future<Output = Result<Map<String, Value>, ExecutorError>> + Send + 'a>>;
+
+impl LoadedExecutor {
+    fn execute<'a>(
+        &'a self,
+        request: ExecuteRequest,
+        context: &'a ExecutionContext,
+    ) -> ExecutionFuture<'a> {
+        match self {
+            Self::Compiled(executor) => executor.execute(request, context),
+            Self::Runtime(executor) => Box::pin(executor.execute_runtime(request, context)),
+        }
+    }
+
+    fn timeout_retryable(&self) -> bool {
+        match self {
+            Self::Compiled(executor) => executor.metadata().timeout_retryable,
+            Self::Runtime(_) => false,
+        }
+    }
+}
+
 impl Worker {
     /// Starts a claimed attempt, runs it and reports its logs and outcome, unless the lease
     /// is gone or the worker shuts down first. Its scratch directory is removed last.
@@ -200,6 +236,8 @@ impl Worker {
             lease,
             pending: Vec::new(),
             taken: 0,
+            redactor: Redactor::default(),
+            tails: HashMap::new(),
         };
         let mut scratch = None;
         let outcome = if job.cancel_requested {
@@ -210,7 +248,7 @@ impl Worker {
         };
         // The logs go first: completing ends the lease that appending needs.
         if let Some(outcome) = outcome
-            && logs.flush().await
+            && logs.flush_final().await
             && let Err(error) = retrying(|| self.db.complete(lease.0, lease.1, &outcome)).await
         {
             tracing::warn!(error = %error, "completing a node run failed");
@@ -234,26 +272,133 @@ impl Worker {
         logs: &mut Logs<'_>,
         scratch: &mut Option<TempDir>,
     ) -> Option<Outcome> {
+        let attempt_started = Instant::now();
+        let timeout_duration = Duration::from_secs(u64::from(job.timeout_seconds.unsigned_abs()));
         let found = executor
             .split_once('@')
             .and_then(|(key, version)| self.registry.find(key, version));
-        let Some(found) = found else {
-            let message = format!("This worker has no executor {executor}.");
-            return Some(failed(None, "executor_missing", &message, false));
+        let found = match found {
+            Some(found) => LoadedExecutor::Compiled(found),
+            None => {
+                let payload = match self.db.runtime_plugin(logs.lease.0, logs.lease.1).await {
+                    Ok(Some(payload)) => payload,
+                    Ok(None) => {
+                        return Some(failed(
+                            None,
+                            "executor_missing",
+                            "The exact runtime plugin is unavailable.",
+                            false,
+                        ));
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "loading a runtime plugin failed");
+                        return None;
+                    }
+                };
+                let (Ok(manifest), Ok(capabilities)) = (
+                    serde_json::from_value(payload.manifest),
+                    serde_json::from_value(payload.capabilities),
+                ) else {
+                    return Some(failed(
+                        None,
+                        "executor_missing",
+                        "The stored plugin manifest is invalid.",
+                        false,
+                    ));
+                };
+                let preparing = RuntimePlugin::new(manifest, payload.component, capabilities);
+                tokio::pin!(preparing);
+                let mut heartbeat = tokio::time::interval(self.config.heartbeat);
+                let preparing_leases = [logs.lease];
+                let compiled = loop {
+                    tokio::select! {
+                        result = &mut preparing => break result,
+                        _ = heartbeat.tick() => {
+                            match retrying(|| self.db.heartbeat(&preparing_leases, self.config.lease_seconds)).await {
+                                Ok(statuses) if statuses.iter().any(|status| !status.alive) => return None,
+                                Ok(statuses) if statuses.iter().any(|status| status.cancel_requested) => return Some(Outcome::Canceled),
+                                Ok(_) => {},
+                                Err(error) => tracing::warn!(error = %error, "renewing a preparing plugin lease failed"),
+                            }
+                        }
+                        () = sleep_until(attempt_started + timeout_duration) => {
+                            return Some(failed(None, "timeout", "The runtime plugin did not prepare before the node deadline.", false));
+                        }
+                        () = self.stop.cancelled() => return None,
+                    }
+                };
+                match compiled {
+                    Ok(plugin) => LoadedExecutor::Runtime(plugin),
+                    Err(error) => return Some(failed(None, &error.code, &error.message, false)),
+                }
+            }
         };
         let node = job.graph.nodes.iter().find(|node| node.id == job.node_id);
         let node = node.expect("the pinned graph holds every node of its run");
-        let resolved = resolve_inputs(
+        let references =
+            referenced_secret_ids(&serde_json::to_value(node).expect("node serializes"));
+        let mut bound_secrets = HashMap::new();
+        if !references.is_empty() {
+            let Some(key) = &self.config.master_key else {
+                return Some(failed(
+                    None,
+                    "secret_unavailable",
+                    "The worker encryption key is unavailable.",
+                    false,
+                ));
+            };
+            let encrypted = match self.db.bound_secrets(logs.lease.0, logs.lease.1).await {
+                Ok(encrypted) => encrypted,
+                Err(error) => {
+                    tracing::warn!(error = %error, "loading bound secrets failed");
+                    return None;
+                }
+            };
+            for record in encrypted {
+                match key.decrypt(record.organization_id, record.id, &record.encrypted()) {
+                    Ok(value) => {
+                        bound_secrets.insert(record.id, value);
+                    }
+                    Err(_) => {
+                        return Some(failed(
+                            None,
+                            "secret_unavailable",
+                            "A bound secret could not be decrypted.",
+                            false,
+                        ));
+                    }
+                }
+            }
+            if references.iter().any(|id| !bound_secrets.contains_key(id)) {
+                return Some(failed(
+                    None,
+                    "secret_unavailable",
+                    "A bound secret is unavailable.",
+                    false,
+                ));
+            }
+        }
+        logs.redactor = Redactor::new(bound_secrets.values().cloned());
+        let resolved = resolve_inputs_with_secrets(
             node,
             &job.definition,
             &job.graph,
             &job.run_input,
             &job.upstream_outputs,
+            &bound_secrets,
         );
         let inputs = match resolved {
             Ok(inputs) => inputs,
-            Err(NodeFailure { code, message }) => return Some(failed(None, code, &message, false)),
+            Err(NodeFailure { code, message }) => {
+                return Some(failed(None, code, &logs.redactor.text(&message), false));
+            }
         };
+        let persisted_inputs = logs
+            .redactor
+            .json(&Value::Object(inputs.clone()))
+            .as_object()
+            .expect("redacted object")
+            .clone();
         let created = tempfile::Builder::new()
             .prefix("corqty-node-")
             .tempdir_in(&self.config.scratch_root);
@@ -261,11 +406,16 @@ impl Worker {
             Ok(created) => scratch.insert(created).path().to_owned(),
             Err(error) => {
                 let message = format!("The worker could not create a scratch directory: {error}.");
-                return Some(failed(Some(inputs), "scratch_unavailable", &message, true));
+                return Some(failed(
+                    Some(persisted_inputs),
+                    "scratch_unavailable",
+                    &logs.redactor.text(&message),
+                    true,
+                ));
             }
         };
-        let limit = Duration::from_secs(u64::from(job.timeout_seconds.unsigned_abs()));
-        let request = ExecuteRequest {
+        let limit = timeout_duration.saturating_sub(attempt_started.elapsed());
+        let mut request = ExecuteRequest {
             execution_id: job.execution_id,
             attempt: job.attempt.unsigned_abs(),
             workflow_id: job.workflow_id,
@@ -273,30 +423,65 @@ impl Worker {
             node_id: job.node_id.clone(),
             inputs: inputs.clone(),
             config: node.config.clone(),
-            deadline: Utc::now() + TimeDelta::seconds(i64::from(job.timeout_seconds)),
+            deadline: Utc::now() + TimeDelta::from_std(limit).unwrap_or_default(),
         };
+        if matches!(found, LoadedExecutor::Runtime(_)) {
+            for (port, binding) in &node.inputs {
+                if let InputBinding::Secret { secret_id } = binding {
+                    request.inputs.insert(
+                        port.clone(),
+                        serde_json::json!({"kind":"secret", "secretId":secret_id}),
+                    );
+                }
+            }
+        }
         let ended = self
-            .supervise(found.as_ref(), request, scratch_dir, limit, logs)
+            .supervise(&found, request, scratch_dir, limit, logs, bound_secrets)
             .await;
         Some(match ended {
+            Ended::Returned(Ok(output))
+                if logs.redactor.contains_json(&Value::Object(output.clone())) =>
+            {
+                failed(
+                    Some(persisted_inputs),
+                    "secret_output_detected",
+                    "The executor output contains a bound secret.",
+                    false,
+                )
+            }
             Ended::Returned(Ok(output)) => match validate_output(&job.definition, &output) {
                 Ok(()) => Outcome::Succeeded {
-                    input: inputs,
+                    input: persisted_inputs,
                     output,
                 },
-                Err(NodeFailure { code, message }) => failed(Some(inputs), code, &message, false),
+                Err(NodeFailure { code, message }) => failed(
+                    Some(persisted_inputs),
+                    code,
+                    &logs.redactor.text(&message),
+                    false,
+                ),
             },
             Ended::Returned(Err(error)) => {
                 let retryable = is_retryable(&error.code, error.retryable);
-                failed(Some(inputs), &error.code, &error.message, retryable)
+                failed(
+                    Some(persisted_inputs),
+                    &logs.redactor.text(&error.code),
+                    &logs.redactor.text(&error.message),
+                    retryable,
+                )
             }
             Ended::Deadline => {
                 let message = format!(
                     "The attempt did not finish within its timeout of {} s.",
                     job.timeout_seconds
                 );
-                let retryable = found.metadata().timeout_retryable;
-                failed(Some(inputs), "timeout", &message, retryable)
+                let retryable = found.timeout_retryable();
+                failed(
+                    Some(persisted_inputs),
+                    "timeout",
+                    &logs.redactor.text(&message),
+                    retryable,
+                )
             }
             Ended::Canceled => Outcome::Canceled,
             Ended::Abandoned => return None,
@@ -309,14 +494,16 @@ impl Worker {
     /// executor's own answer is ignored then.
     async fn supervise(
         &self,
-        executor: &dyn Executor,
+        executor: &LoadedExecutor,
         request: ExecuteRequest,
         scratch_dir: PathBuf,
         limit: Duration,
         logs: &mut Logs<'_>,
+        bound_secrets: HashMap<Uuid, String>,
     ) -> Ended {
         let (sender, mut receiver) = mpsc::channel(LOG_CHANNEL_CAPACITY);
         let context = ExecutionContext {
+            bound_secrets,
             cancel: CancellationToken::new(),
             scratch_dir,
             logs: sender,
@@ -387,6 +574,8 @@ struct Logs<'a> {
     pending: Vec<(LogStream, String)>,
     /// How many bytes the executor has sent.
     taken: usize,
+    redactor: Redactor,
+    tails: HashMap<&'static str, String>,
 }
 
 impl Logs<'_> {
@@ -415,11 +604,36 @@ impl Logs<'_> {
         let (node_run_id, lease_token) = self.lease;
         for (stream, text) in std::mem::take(&mut self.pending) {
             let stream = stream.as_str();
+            let pending = self.tails.entry(stream).or_default();
+            pending.push_str(&text);
+            let text = self.redactor.stream_prefix(pending, false);
+            if text.is_empty() {
+                continue;
+            }
             match retrying(|| self.db.append_log(node_run_id, lease_token, stream, &text)).await {
                 Ok(true) => {}
                 Ok(false) => return false,
                 // ponytail: text that a database error rejected is dropped, not sent again.
                 Err(error) => tracing::warn!(error = %error, "appending a node log failed"),
+            }
+        }
+        true
+    }
+
+    async fn flush_final(&mut self) -> bool {
+        if !self.flush().await {
+            return false;
+        }
+        let (node_run_id, lease_token) = self.lease;
+        for (stream, mut pending) in std::mem::take(&mut self.tails) {
+            let text = self.redactor.stream_prefix(&mut pending, true);
+            if text.is_empty() {
+                continue;
+            }
+            match retrying(|| self.db.append_log(node_run_id, lease_token, stream, &text)).await {
+                Ok(true) => {}
+                Ok(false) => return false,
+                Err(error) => tracing::warn!(error = %error, "appending a final node log failed"),
             }
         }
         true

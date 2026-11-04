@@ -1,11 +1,14 @@
 #![forbid(unsafe_code)]
 
-//! The executors a worker can run. Milestone 4 adds the Wasmtime host for runtime plugins here.
+//! Trusted compiled executors and the capability-scoped WebAssembly Component host.
 
 use std::sync::Arc;
 
-use corqty_plugin_sdk::{Capability, Executor, ExecutorMetadata, HOST_CONTRACT};
+use corqty_plugin_sdk::{Executor, ExecutorMetadata, HOST_CONTRACT};
 use thiserror::Error;
+
+pub mod runtime;
+pub use runtime::{PluginCapability, PluginManifest, RuntimePlugin};
 
 /// Why a worker refuses to start with a set of executors.
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -19,11 +22,6 @@ pub enum RegistryError {
         executor: String,
         host_contract: String,
     },
-    #[error("executor {executor} declares {capability:?}, which this host grants from Milestone 4")]
-    UnsupportedCapability {
-        executor: String,
-        capability: Capability,
-    },
     #[error("executor {0} is registered twice")]
     DuplicateExecutor(String),
 }
@@ -33,7 +31,8 @@ pub struct Registry(Vec<Arc<dyn Executor>>);
 
 impl Registry {
     /// Accepts executors with a lowercase slug key, a `MAJOR.MINOR.PATCH` version, this host's
-    /// contract, only the capabilities Milestone 3 grants, and a unique `key@version`.
+    /// contract and a unique `key@version`. Compiled code is trusted by the operator;
+    /// uploaded components use the separate capability-scoped runtime host.
     pub fn new(executors: Vec<Arc<dyn Executor>>) -> Result<Self, RegistryError> {
         let mut identities = Vec::new();
         for executor in &executors {
@@ -49,19 +48,6 @@ impl Registry {
                 return Err(RegistryError::UnsupportedHostContract {
                     executor: identity,
                     host_contract: metadata.host_contract.to_owned(),
-                });
-            }
-            // ponytail: Milestone 3 grants log, scratch-fs and command-exec to every compiled
-            // executor; secret-read, network and per-plugin approval arrive in Milestone 4.
-            if let Some(capability) = metadata.capabilities.into_iter().find(|capability| {
-                matches!(
-                    capability,
-                    Capability::SecretRead | Capability::Network { .. }
-                )
-            }) {
-                return Err(RegistryError::UnsupportedCapability {
-                    executor: identity,
-                    capability,
                 });
             }
             if identities.contains(&identity) {
@@ -111,7 +97,9 @@ fn is_valid_key(key: &str) -> bool {
 
 fn is_valid_version(version: &str) -> bool {
     version.split('.').count() == 3
-        && version
-            .split('.')
-            .all(|number| !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()))
+        && version.split('.').all(|number| {
+            !number.is_empty()
+                && (number == "0" || !number.starts_with('0'))
+                && number.bytes().all(|byte| byte.is_ascii_digit())
+        })
 }

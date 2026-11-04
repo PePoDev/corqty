@@ -364,17 +364,17 @@ async fn runners_create_runs_from_the_plan_and_viewers_cannot() {
             audit(
                 "run.started",
                 first.id,
-                json!({"runId": first.id, "version": 1})
+                json!({"runId": first.id, "version": 1, "source": "manual"})
             ),
             audit(
                 "run.rerun",
                 second.id,
-                json!({"runId": second.id, "sourceRunId": first.id, "version": 1})
+                json!({"runId": second.id, "sourceRunId": first.id, "version": 1, "source": "manual"})
             ),
             audit(
                 "run.started",
                 empty.id,
-                json!({"runId": empty.id, "version": 1})
+                json!({"runId": empty.id, "version": 1, "source": "manual"})
             ),
         ]
     );

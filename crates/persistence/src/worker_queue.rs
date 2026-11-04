@@ -88,6 +88,20 @@ pub struct WorkerDb {
 }
 
 impl WorkerDb {
+    /// Ciphertexts only for secret references of this currently leased node.
+    pub async fn bound_secrets(
+        &self,
+        node_run_id: Uuid,
+        lease_token: i64,
+    ) -> Result<Vec<crate::secrets::BoundSecretRecord>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM corqty.bound_secrets($1, $2, $3)")
+            .bind(self.worker_id)
+            .bind(node_run_id)
+            .bind(lease_token)
+            .fetch_all(&self.pool)
+            .await
+    }
+
     #[must_use]
     pub const fn new(pool: PgPool, worker_id: Uuid) -> Self {
         Self { pool, worker_id }
@@ -100,14 +114,36 @@ impl WorkerDb {
 
     /// Records the executors this worker runs, as `"<key>@<version>"`, and its capacity.
     pub async fn register(&self, executors: &[String], capacity: i32) -> Result<(), sqlx::Error> {
-        // Host contracts stay empty until plugins are loaded at run time.
-        sqlx::query("SELECT corqty.register_worker($1, $2, '{}', $3)")
+        self.register_with_contracts(executors, &[], capacity).await
+    }
+
+    pub async fn register_with_contracts(
+        &self,
+        executors: &[String],
+        contracts: &[String],
+        capacity: i32,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("SELECT corqty.register_worker($1, $2, $3, $4)")
             .bind(self.worker_id)
             .bind(executors)
+            .bind(contracts)
             .bind(capacity)
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    pub async fn runtime_plugin(
+        &self,
+        node_run_id: Uuid,
+        lease_token: i64,
+    ) -> Result<Option<crate::plugins::RuntimePayload>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM corqty.runtime_plugin($1,$2,$3)")
+            .bind(self.worker_id)
+            .bind(node_run_id)
+            .bind(lease_token)
+            .fetch_optional(&self.pool)
+            .await
     }
 
     /// Leases up to `limit` due node runs of the registered executors for `lease_seconds`.
