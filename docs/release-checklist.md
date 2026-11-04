@@ -20,7 +20,7 @@ that a public SaaS deployment has been provisioned or independently audited.
 | 9 | Compatible precompiled component upload, approval, bounded execution | `hello.wasm` installed/approved/executed in live Compose; focused plugin HTTP tests and 19 Linux plugin-host tests passed, including capability/limit and process-group checks. |
 | 10 | Explicit opt-in trusted shell consumes/produces JSON | Live foundation smoke passed shell execution in Docker. Production override forces trusted execution off. |
 | 11 | Encrypted, redacted, tenant-isolated secrets | Full secrets API, persistence fencing, and worker redaction/output-rejection suites passed; live smoke confirmed metadata reads omit values. |
-| 12 | Complete automated and Compose suites pass | Both live Compose suites, 213 Rust workspace tests, 136 frontend tests, lint/build and Linux contracts passed locally. Pushed-revision CI remains to be recorded below. |
+| 12 | Complete automated and Compose suites pass | Both live Compose suites, 213 Rust workspace tests, 136 frontend tests, lint/build and Linux contracts passed locally. CI also passed every check on code revision `2dd5b3d`; see the run below. |
 
 ## Verification ledger
 
@@ -40,7 +40,11 @@ that a public SaaS deployment has been provisioned or independently audited.
 - [x] Final `cargo test --workspace`: 213 passing tests, including PostgreSQL integration tests.
 - [x] Linux contract tests: 15 shell and 19 plugin-host tests passed, including
   process-group cleanup (34 total).
-- [ ] Pushed-revision CI completes successfully; record revision and run URL.
+- [x] Pushed-revision CI passed on `2dd5b3db43b4f774a263d7ed30a7e4e2dc007b9a`:
+  [GitHub Actions run 41837404675](https://github.com/PePoDev/corqty/actions/runs/41837404675).
+  This includes workspace formatting/clippy/tests, frontend lint/tests/build,
+  both dependency audits, a fresh three-worker Compose build, and both smoke
+  suites. Subsequent documentation-only commits record verification and cleanup.
 
 The first full Windows compilation exceeded available paging resources. Bounded
 build concurrency and reduced dependency debug information resolved it; the

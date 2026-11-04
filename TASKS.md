@@ -35,7 +35,10 @@ pull requests are used, per the user's instruction.
 
 ## Final release bookkeeping
 
-- [ ] Complete the pushed revision's CI and record its run in docs/release-checklist.md.
+- [x] Complete code revision `2dd5b3d`'s CI and record its successful
+  [run](https://github.com/PePoDev/corqty/actions/runs/41837404675)
+  in docs/release-checklist.md. Subsequent commits only record verification
+  and Docker cleanup.
 - [x] Remove unused Docker containers/images after delivery verification:
   one stopped container and 20 unused images removed, reclaiming 6.42 GB.
   Unused build cache cleared separately, reclaiming another 39.02 GB.
