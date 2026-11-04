@@ -51,6 +51,26 @@ The first full Windows compilation exceeded available paging resources. Bounded
 build concurrency and reduced dependency debug information resolved it; the
 complete workspace suite subsequently passed.
 
+## Documentation and repository-layout verification
+
+The 2026-11-04 layout update at `b5d47b146e1842e37d546d02cc58f660f599ca77`
+moves Docker support files under `docker/` and the sample under
+`plugins/example-wasm/`. It passed:
+
+- Rebuilding the sample, 18 plugin-host tests, and two plugin API tests.
+- Main, standalone test, and production Compose configuration checks, including
+  the resolved PostgreSQL initialization mount and web Dockerfile path.
+- [CI run 41853170198](https://github.com/PePoDev/corqty/actions/runs/41853170198):
+  full Rust/frontend checks, both dependency audits, fresh three-worker Compose
+  startup, and both live smoke suites.
+
+The accompanying documentation was reviewed against source. Checks covered 24
+Markdown files, 481 local links/anchors, 13 JSON examples, 28 parsed Mermaid
+diagrams, and eight valid SVG placeholders. Two existing product screenshots
+were visually reviewed and copied unchanged; future capture requests are
+explicitly labeled in the [visual tour](visual-tour.md). Commits following the
+layout revision only update documentation and visual assets.
+
 ## Deployment-owner launch checks
 
 These depend on the destination environment and are distinct from repository
