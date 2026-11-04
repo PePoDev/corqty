@@ -36,7 +36,9 @@ pull requests are used, per the user's instruction.
 ## Final release bookkeeping
 
 - [ ] Complete the pushed revision's CI and record its run in docs/release-checklist.md.
-- [ ] Remove unused Docker containers/images after delivery verification.
+- [x] Remove unused Docker containers/images after delivery verification:
+  one stopped container and 20 unused images removed, reclaiming 6.42 GB.
+  Seven healthy running containers and all data volumes were preserved.
 
 Deployment-specific domain/TLS, backups/restore drills, capacity/monitoring, and
 customer access/support decisions belong to the deployment owner. They are
